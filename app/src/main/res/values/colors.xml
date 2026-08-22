@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 主题色：莫兰迪蓝（与 ui/theme/Color.kt 保持一致） -->
+    <color name="brand_blue">#6B82A6</color>
+    <!-- 高温提示色：浅橙 -->
+    <color name="state_high_temp">#F5A67A</color>
+    <!-- 低温提示色：浅蓝 -->
+    <color name="state_low_temp">#7EB3D5</color>
+</resources>
