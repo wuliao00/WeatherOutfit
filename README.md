@@ -12,7 +12,9 @@
 
 ##  下    载
 > 蓝奏云:https://wwazj.lanzoum.com/b01eupxd2f   密码:5pfd
-.
+> 夸克网盘：https://pan.quark.cn/s/9a513e59fe90?pwd=J1xs  提取码：J1xs
+     <img width="156" height="149" alt="image" src="https://github.com/user-attachments/assets/2a947a91-5300-45b7-bfc7-b8bbc2fe0b96" />
+
 
 ## 功能一览
 
