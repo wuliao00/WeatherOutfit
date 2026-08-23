@@ -11,9 +11,8 @@
 > 开箱即用：项目内置公共测试凭证，clone 后直接编译运行；正式使用请注册个人凭证（见下文）。本应用完全免费，唯一作者为「莫」，任何以本应用名义收费的行为均为诈骗。
 
 ##  下    载
-> https://wwazj.lanzoum.com/b01eupxd2f
-> 密码:5pfd
-
+> 蓝奏云:https://wwazj.lanzoum.com/b01eupxd2f   密码:5pfd
+.
 
 ## 功能一览
 
