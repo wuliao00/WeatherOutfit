@@ -1,6 +1,6 @@
 # 简衣 · WeatherOutfit
 
-![Platform](https://img.shields.io/badge/Platform-Android-3DDC84?logo=android&logoColor=white)
+![平台](https://img.shields.io/badge/Platform-Android-3DDC84?logo=android&logoColor=white)
 ![Kotlin](https://img.shields.io/badge/Kotlin-2.0-7F52FF?logo=kotlin&logoColor=white)
 ![Compose](https://img.shields.io/badge/UI-Jetpack%20Compose%20%2B%20M3-4285F4)
 ![API](https://img.shields.io/badge/API-26%20~%2035-blue)
@@ -9,6 +9,11 @@
 **根据实时天气智能推荐穿搭的 Android 原生应用。** 基于中国气象局数据接口（apihz.cn），按温度、湿度、紫外线、风力四个维度生成通勤 / 户外 / 休闲三场景穿搭方案，支持耐寒耐热、常用风格等个性化修正。严格遵循「清晰、顺从、深度、极简主义」四大设计理念：首屏只保留温度、天气状态与穿搭推荐，无社交、无广告、无资讯，全 App 主色不超过三种。
 
 > 开箱即用：项目内置公共测试凭证，clone 后直接编译运行；正式使用请注册个人凭证（见下文）。本应用完全免费，唯一作者为「莫」，任何以本应用名义收费的行为均为诈骗。
+
+##  下    载
+> https://wwazj.lanzoum.com/b01eupxd2f
+> 密码:5pfd
+
 
 ## 功能一览
 
@@ -33,11 +38,11 @@
 
 ## 快速开始
 
-1. 用 Android Studio（Ladybug 及以上版本）打开项目根目录，等待 Gradle Sync 完成。
+
 2. 确认 `local.properties` 中的天气接口凭证（项目已内置官方公共测试凭证，开箱即用）。
 3. 连接设备或模拟器，点击 Run。
 
-> 命令行构建：`./gradlew assembleDebug`（需 JDK 17+）。
+ 命令行构建：`./gradlew assembleDebug`（需 JDK 17+）。
 > 单元测试：`./gradlew test`（穿搭推荐引擎）。
 
 ## 如何注册获取 API 凭证
