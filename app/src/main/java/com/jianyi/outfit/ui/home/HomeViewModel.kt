@@ -55,14 +55,23 @@ class HomeViewModel(private val app: WeatherOutfitApp) : ViewModel() {
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
-    /** 已加载的数据源 key，防止 Flow 重放触发重复请求 */
+    /** 已加载的数据源 key（与仓库缓存 key 同构），防止 Flow 重放触发重复请求；详情页复用其读缓存 */
     private var loadedKey: String? = null
+
+    /** 详情页跳转用的天气缓存 key（与 loadedKey 同步，UI 层经导航参数传递） */
+    val currentCacheKey: String? get() = loadedKey
+
+    /** 自动定位去重标记：currentCity 连续发射 null 时避免重复触发定位链 */
+    private var autoResolved = false
 
     /** 刷新节流：两次手动请求的最小间隔（防止连点触发接口限流） */
     private var lastRequestAt = 0L
 
     companion object {
         private const val MIN_REQUEST_INTERVAL_MS = 10_000L
+
+        /** IP 自动定位的数据源 key，与仓库缓存 key 同构 */
+        private const val IP_KEY = "ip"
     }
 
     /** 限流自动重试仅允许一次，避免公共凭证持续饱和时无限循环 */
@@ -84,8 +93,13 @@ class HomeViewModel(private val app: WeatherOutfitApp) : ViewModel() {
         viewModelScope.launch {
             container.cityRepository.currentCity.collect { city ->
                 if (city == null) {
-                    resolveAutoLocation(force = false)
+                    // 去重：仅首次 null 触发定位链，后续 null 发射（其他行变更）不再重复请求
+                    if (!autoResolved) {
+                        autoResolved = true
+                        resolveAutoLocation(force = false)
+                    }
                 } else {
+                    autoResolved = false
                     val key = "addr|${city.province}|${city.city}"
                     if (key != loadedKey) {
                         load(key, LocationSource.MANUAL) {
@@ -122,7 +136,7 @@ class HomeViewModel(private val app: WeatherOutfitApp) : ViewModel() {
                 return
             }
         }
-        load("ip", LocationSource.IP) { container.weatherRepository.byIp(force = force) }
+        load(IP_KEY, LocationSource.IP) { container.weatherRepository.byIp(force = force) }
     }
 
     /** 下拉/点击刷新：10 秒节流后跳过缓存强制走网络 */
@@ -209,7 +223,6 @@ class HomeViewModel(private val app: WeatherOutfitApp) : ViewModel() {
             onSuccess = { weather ->
                 loadedKey = key
                 rateLimitAutoRetried = false
-                container.sessionWeather = weather
                 _uiState.update { state ->
                     state.copy(
                         isLoading = false,
@@ -265,9 +278,9 @@ class HomeViewModel(private val app: WeatherOutfitApp) : ViewModel() {
         )
     }
 
-    /** GPS 数据源 key（保留两位小数，位置微动不触发重复加载） */
+    /** GPS 数据源 key：与仓库缓存 key 同构（loc|纬度|经度，两位小数防微动重复加载），详情页可直接读缓存 */
     private fun gpsKey(lat: Double, lon: Double): String =
-        String.format(Locale.US, "gps|%.2f|%.2f", lat, lon)
+        String.format(Locale.US, "loc|%.2f|%.2f", lat, lon)
 
     /** 极端天气预警开关开启时，收到预警立即通知 */
     private suspend fun notifyExtremeWeatherIfNeeded(weather: WeatherNow) {

@@ -10,24 +10,42 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 /**
- * 穿搭模板仓库：保存/删除用户自定义穿搭方案与收藏的推荐方案。
+ * 穿搭模板仓库接口：保存/删除用户自定义穿搭方案与收藏的推荐方案，
+ * 便于 JVM 单测替换实现。
  */
-class OutfitTemplateRepository(
-    private val dao: OutfitTemplateDao,
-    private val gson: Gson = Gson()
-) {
+interface OutfitTemplateRepository {
 
     /** 观察全部模板（按创建时间倒序） */
-    val templates: Flow<List<CustomOutfitTemplate>> = dao.observeAll().map { list ->
+    val templates: Flow<List<CustomOutfitTemplate>>
+
+    /** 保存自定义模板，返回新记录 id */
+    suspend fun save(template: CustomOutfitTemplate): Long
+
+    /** 将推荐方案收藏为模板（首页长按推荐卡片触发） */
+    suspend fun saveFromPlan(plan: OutfitPlan, minTemp: Int, maxTemp: Int): Long
+
+    suspend fun delete(id: Long)
+}
+
+/**
+ * 穿搭模板仓库实现。
+ */
+class OutfitTemplateRepositoryImpl(
+    private val dao: OutfitTemplateDao,
+    private val gson: Gson = Gson()
+) : OutfitTemplateRepository {
+
+    /** 观察全部模板（按创建时间倒序） */
+    override val templates: Flow<List<CustomOutfitTemplate>> = dao.observeAll().map { list ->
         list.map { it.toModel() }
     }
 
     /** 保存自定义模板，返回新记录 id */
-    suspend fun save(template: CustomOutfitTemplate): Long =
+    override suspend fun save(template: CustomOutfitTemplate): Long =
         dao.insert(template.toEntity())
 
     /** 将推荐方案收藏为模板（首页长按推荐卡片触发） */
-    suspend fun saveFromPlan(plan: OutfitPlan, minTemp: Int, maxTemp: Int): Long =
+    override suspend fun saveFromPlan(plan: OutfitPlan, minTemp: Int, maxTemp: Int): Long =
         save(
             CustomOutfitTemplate(
                 name = "推荐方案·${plan.scene}",
@@ -39,7 +57,7 @@ class OutfitTemplateRepository(
             )
         )
 
-    suspend fun delete(id: Long) = dao.deleteById(id)
+    override suspend fun delete(id: Long) = dao.deleteById(id)
 
     /* ============ 实体与领域模型互转 ============ */
 

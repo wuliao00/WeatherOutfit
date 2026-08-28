@@ -88,7 +88,7 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
-    onNavigateToDetail: () -> Unit,
+    onNavigateToDetail: (String) -> Unit,
     onNavigateToCity: () -> Unit,
     onNavigateToSettings: () -> Unit,
     viewModel: HomeViewModel = viewModel(factory = AppViewModelProvider.Factory)
@@ -215,7 +215,10 @@ fun HomeScreen(
                 else -> HomeContent(
                     state = state,
                     innerPadding = innerPadding,
-                    onNavigateToDetail = onNavigateToDetail,
+                    // 携带当前天气的缓存 key 跳转，详情页据此从仓库读快照（无全局可变状态）
+                    onNavigateToDetail = {
+                        viewModel.currentCacheKey?.let(onNavigateToDetail)
+                    },
                     onSaveTemplate = viewModel::saveCurrentAsTemplate,
                     onUseGpsLocation = ::requestGpsFromHome
                 )

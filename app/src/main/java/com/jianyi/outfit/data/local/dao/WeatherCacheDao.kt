@@ -18,4 +18,8 @@ interface WeatherCacheDao {
 
     @Query("DELETE FROM weather_cache WHERE cacheKey = :key")
     suspend fun evict(key: String)
+
+    /** 删除早于阈值时间戳的记录（按 cachedAt 判断），防止缓存表只增不清 */
+    @Query("DELETE FROM weather_cache WHERE cachedAt < :staleBefore")
+    suspend fun deleteStale(staleBefore: Long)
 }

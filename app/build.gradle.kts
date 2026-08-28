@@ -66,6 +66,12 @@ android {
     }
 }
 
+// Room 导出 schema 到 app/schemas/，便于后续版本演进时对比与编写迁移
+// （ksp 为 KSP 插件提供的模块级扩展，必须置于 android {} 块之外）
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 dependencies {
     // AndroidX 基础
     implementation(libs.androidx.core.ktx)
@@ -92,6 +98,9 @@ dependencies {
 
     // DataStore 轻量配置
     implementation(libs.androidx.datastore.preferences)
+
+    // 后台任务：每日穿搭推送（WorkManager 持久化调度）
+    implementation(libs.androidx.work.runtime.ktx)
 
     // 网络
     implementation(libs.retrofit)

@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">简衣</string>
     <string name="channel_daily">每日穿搭推送</string>
-    <string name="channel_daily_desc">每天早上 8 点推送当日穿搭建议</string>
+    <string name="channel_daily_desc">按设定的推送时间每天推送当日穿搭建议</string>
     <string name="channel_alert">极端天气预警</string>
     <string name="channel_alert_desc">暴雨、高温等极端天气提醒</string>
 </resources>

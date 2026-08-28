@@ -1,15 +1,19 @@
 package com.jianyi.outfit.ui.navigation
 
+import android.net.Uri
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.runtime.Composable
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.jianyi.outfit.ui.city.CityScreen
+import com.jianyi.outfit.ui.detail.DETAIL_ARG_CACHE_KEY
 import com.jianyi.outfit.ui.detail.OutfitDetailScreen
 import com.jianyi.outfit.ui.home.HomeScreen
 import com.jianyi.outfit.ui.settings.SettingsScreen
@@ -20,10 +24,16 @@ import com.jianyi.outfit.ui.settings.SettingsScreen
  */
 object Routes {
     const val HOME = "home"
-    const val DETAIL = "detail"
+
+    /** 穿搭详情：携带天气缓存 key，详情页据此从仓库读取首页刚加载的天气 */
+    const val DETAIL = "detail?$DETAIL_ARG_CACHE_KEY={$DETAIL_ARG_CACHE_KEY}"
     const val CITY = "city"
     const val SETTINGS = "settings"
 }
+
+/** 构造详情页路由：cacheKey 经 URL 编码（key 含 “|” 与中文） */
+fun detailRoute(cacheKey: String): String =
+    "detail?$DETAIL_ARG_CACHE_KEY=${Uri.encode(cacheKey)}"
 
 private const val TRANSITION_MS = 300
 
@@ -45,12 +55,22 @@ fun AppNavHost() {
     ) {
         composable(Routes.HOME) {
             HomeScreen(
-                onNavigateToDetail = { navController.navigate(Routes.DETAIL) },
+                onNavigateToDetail = { cacheKey ->
+                    navController.navigate(detailRoute(cacheKey))
+                },
                 onNavigateToCity = { navController.navigate(Routes.CITY) },
                 onNavigateToSettings = { navController.navigate(Routes.SETTINGS) }
             )
         }
-        composable(Routes.DETAIL) {
+        composable(
+            route = Routes.DETAIL,
+            arguments = listOf(
+                navArgument(DETAIL_ARG_CACHE_KEY) {
+                    type = NavType.StringType
+                    defaultValue = ""
+                }
+            )
+        ) {
             OutfitDetailScreen(
                 onBack = { navController.popBackStack() }
             )

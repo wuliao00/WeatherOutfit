@@ -1,5 +1,6 @@
 package com.jianyi.outfit.ui.detail
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.jianyi.outfit.WeatherOutfitApp
@@ -14,6 +15,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+/** 详情页导航参数名：首页加载天气时使用的仓库缓存 key */
+const val DETAIL_ARG_CACHE_KEY = "cacheKey"
+
 /** 穿搭详情页 UI 状态 */
 data class OutfitDetailUiState(
     val weather: WeatherNow? = null,
@@ -25,10 +29,14 @@ data class OutfitDetailUiState(
 
 /**
  * 穿搭详情页 ViewModel：
- * - 复用首页会话中的天气快照生成三场景方案（不重复请求）
+ * - 通过导航参数（天气缓存 key）从仓库缓存读取首页刚加载的天气快照，
+ *   生成三场景方案；无全局可变单例，不存在 null / 旧值竞态
  * - 管理用户自定义穿搭模板
  */
-class OutfitDetailViewModel(private val app: WeatherOutfitApp) : ViewModel() {
+class OutfitDetailViewModel(
+    app: WeatherOutfitApp,
+    savedStateHandle: SavedStateHandle
+) : ViewModel() {
 
     private val container = app.container
 
@@ -36,13 +44,18 @@ class OutfitDetailViewModel(private val app: WeatherOutfitApp) : ViewModel() {
     val uiState: StateFlow<OutfitDetailUiState> = _uiState.asStateFlow()
 
     init {
-        // 首页已加载的天气快照
-        container.sessionWeather?.let { weather ->
-            _uiState.update {
-                it.copy(
-                    weather = weather,
-                    recommendation = OutfitRecommendationEngine.recommend(weather, it.prefs)
-                )
+        // 按导航参数的缓存 key 读取首页刚加载的天气（忽略 TTL，同一次会话内必然新鲜）
+        val cacheKey = savedStateHandle.get<String>(DETAIL_ARG_CACHE_KEY).orEmpty()
+        if (cacheKey.isNotBlank()) {
+            viewModelScope.launch {
+                container.weatherRepository.cachedWeather(cacheKey)?.let { weather ->
+                    _uiState.update {
+                        it.copy(
+                            weather = weather,
+                            recommendation = OutfitRecommendationEngine.recommend(weather, it.prefs)
+                        )
+                    }
+                }
             }
         }
         // 偏好变化 → 重算推荐

@@ -28,14 +28,19 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -45,8 +50,12 @@ import com.jianyi.outfit.data.model.StylePreference
 import com.jianyi.outfit.data.model.TempUnit
 import com.jianyi.outfit.data.model.ToleranceLevel
 import com.jianyi.outfit.data.model.WindUnit
+import com.jianyi.outfit.data.repository.ApiCredentials
 import com.jianyi.outfit.di.AppViewModelProvider
 import com.jianyi.outfit.ui.components.SectionCard
+
+/** 可选的每日推送时刻（点整），与推送时间选择器一一对应 */
+private val PUSH_HOUR_OPTIONS = listOf(6, 7, 8, 9)
 
 /**
  * 设置页：穿搭偏好 / 单位设置 / 通知设置。
@@ -175,10 +184,19 @@ fun SettingsScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         SwitchRow(
                             title = "每日穿搭推送",
-                            subtitle = "每天早上 8:00 推送当日穿搭建议",
+                            subtitle = "按下方设定的推送时间每天提醒一次（默认 8:00）",
                             checked = state.prefs.dailyPushEnabled,
                             onCheckedChange = ::onDailyPushToggle
                         )
+                        PreferenceRow(label = "推送时间") {
+                            SegmentedOptions(
+                                options = PUSH_HOUR_OPTIONS.map { "${it}:00" },
+                                selectedIndex =
+                                    (state.prefs.dailyPushHour - PUSH_HOUR_OPTIONS.first())
+                                        .coerceIn(0, PUSH_HOUR_OPTIONS.lastIndex),
+                                onSelect = { viewModel.setDailyPushHour(PUSH_HOUR_OPTIONS[it]) }
+                            )
+                        }
                         SwitchRow(
                             title = "极端天气预警",
                             subtitle = "收到暴雨、高温等预警时立即提醒",
@@ -187,6 +205,14 @@ fun SettingsScreen(
                         )
                     }
                 }
+            }
+
+            // ===== 接口凭证：用户自填，留空回退内置默认 =====
+            item {
+                ApiCredentialsSection(
+                    credentials = state.apiCredentials,
+                    onSave = viewModel::saveApiCredentials
+                )
             }
 
             // ===== 关于：重新查看使用须知 =====
@@ -200,6 +226,69 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+            }
+        }
+    }
+}
+
+/**
+ * 接口凭证表单：自填 appid / appkey / apiurl 覆盖内置公共凭证。
+ * 留空表示回退默认；本地输入态仅首次加载时初始化，避免覆盖用户输入。
+ */
+@Composable
+private fun ApiCredentialsSection(
+    credentials: ApiCredentials?,
+    onSave: (id: String, key: String, apiUrl: String) -> Unit
+) {
+    var idText by rememberSaveable { mutableStateOf("") }
+    var keyText by rememberSaveable { mutableStateOf("") }
+    var urlText by rememberSaveable { mutableStateOf("") }
+    var initialized by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(credentials) {
+        if (credentials != null && !initialized) {
+            initialized = true
+            idText = credentials.id
+            keyText = credentials.key
+            urlText = credentials.apiUrl
+        }
+    }
+
+    SectionCard(title = "接口凭证（可选）") {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(
+                text = "留空使用内置公共测试凭证（全站共享频次）；" +
+                    "在 apihz.cn 注册后自填个人 id / key 可获独享频次。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            OutlinedTextField(
+                value = idText,
+                onValueChange = { idText = it },
+                singleLine = true,
+                label = { Text("appid (id)") },
+                placeholder = { Text("默认内置") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+            )
+            OutlinedTextField(
+                value = keyText,
+                onValueChange = { keyText = it },
+                singleLine = true,
+                label = { Text("appkey (key)") },
+                placeholder = { Text("默认内置") }
+            )
+            OutlinedTextField(
+                value = urlText,
+                onValueChange = { urlText = it },
+                singleLine = true,
+                label = { Text("接口地址 (apiurl)") },
+                placeholder = { Text("https://cn.apihz.cn/") }
+            )
+            TextButton(
+                onClick = { onSave(idText, keyText, urlText) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("保存凭证")
             }
         }
     }

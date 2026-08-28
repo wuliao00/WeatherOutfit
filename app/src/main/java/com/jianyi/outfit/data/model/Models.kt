@@ -98,8 +98,14 @@ data class UserPreferences(
     val style: StylePreference = StylePreference.MINIMALIST,
     val gender: Gender = Gender.UNKNOWN,
     val dailyPushEnabled: Boolean = false,
+    val dailyPushHour: Int = DEFAULT_DAILY_PUSH_HOUR,
     val extremeAlertEnabled: Boolean = true
-)
+) {
+    companion object {
+        /** 每日推送默认时刻：早上 8 点 */
+        const val DEFAULT_DAILY_PUSH_HOUR = 8
+    }
+}
 
 /* ============ 穿搭推荐相关模型 ============ */
 

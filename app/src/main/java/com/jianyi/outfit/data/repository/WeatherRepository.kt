@@ -2,6 +2,7 @@ package com.jianyi.outfit.data.repository
 
 import com.google.gson.Gson
 import com.google.gson.JsonParser
+import com.jianyi.outfit.BuildConfig
 import com.jianyi.outfit.data.local.dao.WeatherCacheDao
 import com.jianyi.outfit.data.local.entity.WeatherCacheEntity
 import com.jianyi.outfit.data.model.ForecastDay
@@ -14,10 +15,13 @@ import com.jianyi.outfit.data.remote.WeatherEnvelope
 import com.jianyi.outfit.data.remote.WeatherResponse
 import com.jianyi.outfit.engine.OutfitRecommendationEngine
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
 
 /** 接口业务错误（code != 200 时抛出，msg 用于用户提示） */
@@ -30,20 +34,52 @@ class RateLimitedException(message: String, val retryAfterSec: Int) : ApiExcepti
 private data class CacheEnvelope(val type: String, val data: Any)
 
 /**
- * 天气数据仓库：统一处理「缓存 → 网络 → 过期缓存回退」策略。
- * 缓存有效期 30 分钟，过期自动重新请求；断网时回退到过期缓存保证可用。
+ * 天气数据仓库接口：统一「缓存 → 网络 → 过期缓存回退」策略，
+ * 面向 ViewModel 与后台任务的抽象，便于 JVM 单测替换实现。
  */
-class WeatherRepository(
-    private val apiId: String,
-    private val apiKey: String,
+interface WeatherRepository {
+
+    /** IP 自动定位查询（GPS 不可用时的兜底定位） */
+    suspend fun byIp(ip: String? = null, force: Boolean = false): Result<WeatherNow>
+
+    /** 地址查询（省 + 市/区） */
+    suspend fun byAddress(province: String, city: String, force: Boolean = false): Result<WeatherNow>
+
+    /** 经纬度查询（GPS 定位后精确查询） */
+    suspend fun byLatLon(lat: Double, lon: Double, force: Boolean = false): Result<WeatherNow>
+
+    /** 查询未来 7 天预报（不缓存） */
+    suspend fun forecast(province: String, city: String): Result<List<ForecastDay>>
+
+    /**
+     * 读取缓存的天气快照（忽略 TTL）。
+     * 供穿搭详情页按缓存 key 复用首页刚加载的数据，避免重复请求与全局可变状态。
+     */
+    suspend fun cachedWeather(cacheKey: String): WeatherNow?
+}
+
+/**
+ * 天气数据仓库实现。
+ * 凭证解析：用户在设置页自填的 id/key/apiUrl 优先，留空回退 BuildConfig 内置默认；
+ * Retrofit 服务按 baseUrl 缓存复用（OkHttpClient 全局单例）。
+ */
+class WeatherRepositoryImpl(
+    private val credentials: Flow<ApiCredentials>,
     private val gson: Gson = Gson(),
     private val cacheDao: WeatherCacheDao,
-    private val api: WeatherApiService = RetrofitClient.create()
-) {
+    private val apiFactory: (String) -> WeatherApiService = { RetrofitClient.create(it) }
+) : WeatherRepository {
 
     companion object {
         /** 缓存有效期：30 分钟 */
         private const val CACHE_TTL_MS = 30 * 60 * 1000L
+
+        /**
+         * 缓存物理清理阈值：7 天。
+         * 30 分钟内过期数据仍作为弱网 / 限流回退保留，超过 7 天才真正删除，
+         * 既保证「断网回退过期缓存」可用，又避免 weather_cache 只增不清。
+         */
+        private const val CACHE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000L
 
         /** 限流单次退避重试的最长等待（接口建议值超过则封顶，避免长时间卡住加载） */
         private const val RATE_LIMIT_RETRY_CAP_SEC = 10L
@@ -53,28 +89,48 @@ class WeatherRepository(
     private fun isRateLimited(msg: String?): Boolean =
         msg?.contains("频次") == true || msg?.contains("过快") == true
 
-    /** IP 自动定位查询（GPS 不可用时的兜底定位） */
-    suspend fun byIp(ip: String? = null, force: Boolean = false): Result<WeatherNow> =
-        fetchOrCache("ip", force, tag = null) { api.queryByIp(apiId, apiKey, ip) }
+    /** Retrofit 服务按 baseUrl 复用（凭证变更仅影响请求参数，无需重建） */
+    private val apiCache = ConcurrentHashMap<String, WeatherApiService>()
 
-    /** 地址查询（省 + 市/区） */
-    suspend fun byAddress(province: String, city: String, force: Boolean = false): Result<WeatherNow> =
-        fetchOrCache("addr|$province|$city", force, tag = null) {
-            api.queryByAddress(apiId, apiKey, province, city)
+    /** 解析当前生效凭证（用户配置优先）并取对应服务 */
+    private suspend fun apiContext(): Pair<WeatherApiService, ApiCredentials> {
+        val resolved = credentials.first().resolve(
+            defaultId = BuildConfig.WEATHER_API_ID,
+            defaultKey = BuildConfig.WEATHER_API_KEY,
+            defaultUrl = RetrofitClient.DEFAULT_BASE_URL
+        )
+        val api = apiCache.getOrPut(resolved.apiUrl) { apiFactory(resolved.apiUrl) }
+        return api to resolved
+    }
+
+    override suspend fun byIp(ip: String?, force: Boolean): Result<WeatherNow> {
+        val (api, creds) = apiContext()
+        return fetchOrCache("ip", force, tag = null) { api.queryByIp(creds.id, creds.key, ip) }
+    }
+
+    override suspend fun byAddress(province: String, city: String, force: Boolean): Result<WeatherNow> {
+        val (api, creds) = apiContext()
+        return fetchOrCache("addr|$province|$city", force, tag = null) {
+            api.queryByAddress(creds.id, creds.key, province, city)
         }
+    }
 
-    /** 经纬度查询（GPS 定位后精确查询） */
-    suspend fun byLatLon(lat: Double, lon: Double, force: Boolean = false): Result<WeatherNow> =
-        fetchOrCache(String.format(Locale.US, "loc|%.2f|%.2f", lat, lon), force, tag = "latlon") {
-            api.queryByLatLon(apiId, apiKey, lat, lon)
+    override suspend fun byLatLon(lat: Double, lon: Double, force: Boolean): Result<WeatherNow> {
+        val (api, creds) = apiContext()
+        return fetchOrCache(String.format(Locale.US, "loc|%.2f|%.2f", lat, lon), force, tag = "latlon") {
+            api.queryByLatLon(creds.id, creds.key, lat, lon)
         }
+    }
 
-    /** 查询未来 7 天预报（不缓存） */
-    suspend fun forecast(province: String, city: String): Result<List<ForecastDay>> = runCatching {
-        val response = api.queryByAddress(apiId, apiKey, province, city, day = 7, hourType = 1)
+    override suspend fun forecast(province: String, city: String): Result<List<ForecastDay>> = runCatching {
+        val (api, creds) = apiContext()
+        val response = api.queryByAddress(creds.id, creds.key, province, city, day = 7, hourType = 1)
         if (!response.isSuccess) throw ApiException(response.msg ?: "预报查询失败")
         response.toForecast()
     }
+
+    override suspend fun cachedWeather(cacheKey: String): WeatherNow? =
+        readCache(cacheKey, ignoreTtl = true)
 
     /* ============ 内部实现 ============ */
 
@@ -115,11 +171,12 @@ class WeatherRepository(
                     Result.failure(ApiException(response.msg ?: "天气查询失败（code=${response.code}）"))
                 }
             } else {
-                // 成功后写入缓存（经纬度响应带类型标记，回读时按标记选择 DTO）
+                // 成功后写入缓存并顺手清理过期项（经纬度响应带类型标记，回读时按标记选择 DTO）
                 val payload = if (tag != null) gson.toJson(CacheEnvelope(tag, response)) else gson.toJson(response)
                 cacheDao.put(
                     WeatherCacheEntity(cacheKey, payload, System.currentTimeMillis())
                 )
+                runCatching { cacheDao.deleteStale(System.currentTimeMillis() - CACHE_RETENTION_MS) }
                 Result.success(response.toWeather())
             }
         } catch (e: Exception) {

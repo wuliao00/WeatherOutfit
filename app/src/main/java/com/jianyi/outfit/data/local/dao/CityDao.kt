@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import com.jianyi.outfit.data.local.entity.CityEntity
 import kotlinx.coroutines.flow.Flow
@@ -33,6 +34,21 @@ interface CityDao {
 
     @Update
     suspend fun update(city: CityEntity)
+
+    /**
+     * 原子切换当前城市：查重 → 插入 → 清除全部当前标记 → 设为当前。
+     * 多步写在同一事务内执行，保证不会出现双当前城市或丢失标记。
+     */
+    @Transaction
+    suspend fun switchTo(province: String, city: String, source: String, now: Long) {
+        val existing = find(province, city)
+        val id = existing?.id
+            ?: insert(
+                CityEntity(province = province, city = city, source = source, lastUsedAt = now)
+            )
+        clearCurrent()
+        setCurrent(id, now)
+    }
 
     /** 清除全部“当前城市”标记 */
     @Query("UPDATE cities SET isCurrent = 0")
