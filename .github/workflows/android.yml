@@ -1,0 +1,98 @@
+name: Android CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: 单元测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
+
+      - name: Run unit tests
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
+
+  build:
+    name: 构建 APK
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # 仓库里的 local.properties 是 gitignore 的，CI 上必须自己给出凭证与 SDK 路径，
+      # 否则 BuildConfig 会退回公共演示凭证（88888888），构建能过但线上必被限流。
+      - name: Write local.properties
+        env:
+          WEATHER_API_ID: ${{ secrets.WEATHER_API_ID }}
+          WEATHER_API_KEY: ${{ secrets.WEATHER_API_KEY }}
+        run: |
+          {
+            echo "sdk.dir=${ANDROID_HOME}"
+            echo "WEATHER_API_ID=${WEATHER_API_ID:-88888888}"
+            echo "WEATHER_API_KEY=${WEATHER_API_KEY:-88888888}"
+          } > local.properties
+
+      - name: Assemble debug APK
+        run: ./gradlew :app:assembleDebug --stacktrace
+
+      # release 需要 keystore。判断放在 job 级 outputs 上，
+      # 因为 step 的 if 读不到同一 step 自己的 env。
+      - name: Detect release keystore secret
+        id: keystore
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: echo "present=$([ -n "$RELEASE_KEYSTORE_BASE64" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - name: Decode release keystore
+        if: steps.keystore.outputs.present == 'true'
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > "${{ runner.temp }}/release.jks"
+
+      # 没配 secrets 时这里产出的是未签名包 —— 仍然值得构建，
+      # 用来验证 R8 混淆与资源收缩没有把反射/序列化裁坏，而不是让 CI 直接变红。
+      - name: Assemble release APK
+        env:
+          RELEASE_KEYSTORE_PATH: ${{ steps.keystore.outputs.present == 'true' && format('{0}/release.jks', runner.temp) || '' }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: ./gradlew :app:assembleRelease --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apks
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 14

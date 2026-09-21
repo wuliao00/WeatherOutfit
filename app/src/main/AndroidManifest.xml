@@ -17,11 +17,18 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:supportsRtl="true"
+        android:enableOnBackInvokedCallback="true"
         android:theme="@style/Theme.WeatherOutfit">
 
+        <!--
+          preferMinimalPostProcessing（Android 12+）：请求合成器跳过本帧的
+          后处理（圆角/色调映射等），把触摸到上屏的延迟压到最低，
+          这是「动画跟手」里容易被忽略的一半——光有 120Hz 不够，还得让每一帧更早出现。
+        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:preferMinimalPostProcessing="true"
             android:theme="@style/Theme.WeatherOutfit">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

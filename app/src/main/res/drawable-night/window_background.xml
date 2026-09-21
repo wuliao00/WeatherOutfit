@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 深色模式冷启动底色：取「星野银河」的夜空采样色 -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:angle="270"
+                android:centerColor="#1F405E"
+                android:endColor="#0F2234"
+                android:startColor="#152B40"
+                android:type="linear" />
+        </shape>
+    </item>
+</layer-list>

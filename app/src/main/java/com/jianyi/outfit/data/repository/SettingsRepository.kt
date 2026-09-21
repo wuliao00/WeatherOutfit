@@ -9,6 +9,8 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.jianyi.outfit.data.model.Gender
+import com.jianyi.outfit.data.model.GlassQuality
+import com.jianyi.outfit.data.model.SceneryMode
 import com.jianyi.outfit.data.model.StylePreference
 import com.jianyi.outfit.data.model.TempUnit
 import com.jianyi.outfit.data.model.ToleranceLevel
@@ -45,6 +47,25 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setExtremeAlert(enabled: Boolean) = update { it[KEY_EXTREME_ALERT] = enabled }
 
+    /* ============ 视觉与性能偏好 ============ */
+
+    suspend fun setSceneryMode(mode: SceneryMode) = update { it[KEY_SCENERY_MODE] = mode.name }
+
+    /** 手选风景；传 null 表示清除选择 */
+    suspend fun setSceneryKey(key: String?) = update { prefs ->
+        if (key == null) prefs.remove(KEY_SCENERY_KEY) else prefs[KEY_SCENERY_KEY] = key
+    }
+
+    suspend fun setGlassQuality(quality: GlassQuality) =
+        update { it[KEY_GLASS_QUALITY] = quality.name }
+
+    suspend fun setParallaxEnabled(enabled: Boolean) = update { it[KEY_PARALLAX] = enabled }
+
+    suspend fun setBreathingEnabled(enabled: Boolean) = update { it[KEY_BREATHING] = enabled }
+
+    suspend fun setHighFrameRateEnabled(enabled: Boolean) =
+        update { it[KEY_HIGH_FPS] = enabled }
+
     /** 是否已确认首次启动免责声明（勾选「不再提示」后为 true） */
     val disclaimerAccepted: Flow<Boolean> = context.settingsStore.data
         .catch { emit(androidx.datastore.preferences.core.emptyPreferences()) }
@@ -69,6 +90,12 @@ class SettingsRepository(private val context: Context) {
         private val KEY_DAILY_PUSH = booleanPreferencesKey("daily_push")
         private val KEY_EXTREME_ALERT = booleanPreferencesKey("extreme_alert")
         private val KEY_DISCLAIMER_ACCEPTED = booleanPreferencesKey("disclaimer_accepted")
+        private val KEY_SCENERY_MODE = stringPreferencesKey("scenery_mode")
+        private val KEY_SCENERY_KEY = stringPreferencesKey("scenery_key")
+        private val KEY_GLASS_QUALITY = stringPreferencesKey("glass_quality")
+        private val KEY_PARALLAX = booleanPreferencesKey("parallax")
+        private val KEY_BREATHING = booleanPreferencesKey("breathing")
+        private val KEY_HIGH_FPS = booleanPreferencesKey("high_fps")
 
         /** Preferences → 领域模型（未写入过的键取默认值） */
         private fun Preferences.toUserPreferences(): UserPreferences = UserPreferences(
@@ -78,7 +105,13 @@ class SettingsRepository(private val context: Context) {
             style = StylePreference.safe(this[KEY_STYLE]),
             gender = Gender.safe(this[KEY_GENDER]),
             dailyPushEnabled = this[KEY_DAILY_PUSH] ?: false,
-            extremeAlertEnabled = this[KEY_EXTREME_ALERT] ?: true
+            extremeAlertEnabled = this[KEY_EXTREME_ALERT] ?: true,
+            sceneryMode = SceneryMode.safe(this[KEY_SCENERY_MODE]),
+            sceneryKey = this[KEY_SCENERY_KEY],
+            glassQuality = GlassQuality.safe(this[KEY_GLASS_QUALITY]),
+            parallaxEnabled = this[KEY_PARALLAX] ?: true,
+            breathingEnabled = this[KEY_BREATHING] ?: true,
+            highFrameRateEnabled = this[KEY_HIGH_FPS] ?: true
         )
     }
 }

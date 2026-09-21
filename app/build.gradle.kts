@@ -21,8 +21,8 @@ android {
         applicationId = "com.jianyi.outfit"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.0.3"
+        versionCode = 5
+        versionName = "2.0.0"
 
         // 通过 BuildConfig 注入接口凭证，代码中统一使用 BuildConfig.WEATHER_API_ID / KEY
         buildConfigField(
@@ -37,6 +37,21 @@ android {
         vectorDrawables { useSupportLibrary = true }
     }
 
+    // release 签名走环境变量：密钥只存在于 CI secrets 里，仓库不落任何凭据文件。
+    // 没有配齐时保持未签名，让 assembleRelease 依然可用来验证 R8 与资源收缩。
+    val releaseKeystorePath = System.getenv("RELEASE_KEYSTORE_PATH").orEmpty()
+    if (releaseKeystorePath.isNotBlank() && file(releaseKeystorePath).exists()) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(releaseKeystorePath)
+                storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("RELEASE_KEY_ALIAS")
+                // keystore 密码与 key 密码必须一致，否则 PKCS12 会报 BadPadding
+                keyPassword = System.getenv("RELEASE_KEY_PASSWORD") ?: storePassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -45,6 +60,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 
@@ -81,6 +97,15 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
+    implementation(libs.androidx.compose.animation)
+    implementation(libs.androidx.compose.foundation)
+
+    // 液态玻璃：真实背景模糊 + 官方材质预设
+    implementation(libs.haze.core)
+    implementation(libs.haze.materials)
+
+    // 启动屏
+    implementation(libs.androidx.core.splashscreen)
 
     // 导航
     implementation(libs.androidx.navigation.compose)

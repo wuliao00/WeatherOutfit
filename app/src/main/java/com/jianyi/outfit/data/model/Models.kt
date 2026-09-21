@@ -21,7 +21,13 @@ data class WeatherNow(
     val uvIndex: Int,               // 紫外线指数（接口未提供，按天气现象估算）
     val uvLevel: String,            // 紫外线等级描述，如“中等”
     val updateTime: String,         // 数据更新时间
-    val alarms: List<WeatherAlarm>  // 生效中的气象预警
+    val alarms: List<WeatherAlarm>, // 生效中的气象预警
+    /* ---- 以下字段仅经纬度端点提供，缺省为 null，UI 需自行降级显示 ---- */
+    val pressureHpa: Int? = null,   // 气压（hPa）
+    val visibilityM: Int? = null,   // 能见度（米）
+    val cloudCover: Int? = null,    // 云量（%）
+    val sunriseAt: Long? = null,    // 日出时间戳（秒）
+    val sunsetAt: Long? = null      // 日落时间戳（秒）
 ) {
     /** 首页展示用的定位描述 */
     val locationText: String get() = if (province.isNotBlank()) "$province·$city" else city
@@ -90,6 +96,42 @@ enum class Gender(val label: String) {
     }
 }
 
+/* ============ 视觉与性能偏好 ============ */
+
+/** 背景风景的选取方式 */
+enum class SceneryMode(val label: String) {
+    /** 跟随实况天气与时段自动换景（默认） */
+    AUTO_WEATHER("跟随天气"),
+
+    /** 固定使用用户手选的那一张 */
+    FIXED("固定一张"),
+
+    /** 每天自动轮换一张，与天气无关 */
+    DAILY_ROTATE("每日轮换");
+
+    companion object {
+        fun safe(value: String?) = entries.firstOrNull { it.name == value } ?: AUTO_WEATHER
+    }
+}
+
+/**
+ * 玻璃模糊档位。
+ * 真实背景模糊（Android 12+ RenderEffect）每一层都要过一次 GPU，
+ * 在低端机上会直接吃掉帧率，因此把「好不好看」和「流不流畅」拆开交给用户：
+ * - REALTIME   ：卡片与顶栏都做实时模糊，最贴近液态玻璃，需较强 GPU
+ * - BALANCED   ：仅顶栏/浮层实时模糊，卡片用静态磨砂（默认，观感与帧率平衡）
+ * - PERFORMANCE：全部静态磨砂，零运行时模糊开销，省电且必然满帧
+ */
+enum class GlassQuality(val label: String, val desc: String) {
+    REALTIME("全实时", "卡片与顶栏都实时采样背景，最通透"),
+    BALANCED("均衡", "顶栏实时模糊，卡片用静态磨砂"),
+    PERFORMANCE("流畅优先", "全部静态磨砂，省电且不掉帧");
+
+    companion object {
+        fun safe(value: String?) = entries.firstOrNull { it.name == value } ?: BALANCED
+    }
+}
+
 /** 用户偏好（DataStore 持久化） */
 data class UserPreferences(
     val tempUnit: TempUnit = TempUnit.CELSIUS,
@@ -98,7 +140,18 @@ data class UserPreferences(
     val style: StylePreference = StylePreference.MINIMALIST,
     val gender: Gender = Gender.UNKNOWN,
     val dailyPushEnabled: Boolean = false,
-    val extremeAlertEnabled: Boolean = true
+    val extremeAlertEnabled: Boolean = true,
+    /* ---- 视觉与性能 ---- */
+    val sceneryMode: SceneryMode = SceneryMode.AUTO_WEATHER,
+    /** Scenery.key；sceneryMode = FIXED 时生效，为空表示尚未选择 */
+    val sceneryKey: String? = null,
+    val glassQuality: GlassQuality = GlassQuality.BALANCED,
+    /** 滚动视差：背景随列表反向位移，制造纵深 */
+    val parallaxEnabled: Boolean = true,
+    /** 呼吸漂移：背景做极缓慢的缩放漂移，画面不「死」 */
+    val breathingEnabled: Boolean = true,
+    /** 高帧率：向系统请求以屏幕最高刷新率渲染动画（Android 12+） */
+    val highFrameRateEnabled: Boolean = true
 )
 
 /* ============ 穿搭推荐相关模型 ============ */
@@ -117,6 +170,33 @@ data class OutfitRecommendation(
     val plans: List<OutfitPlan>,
     val reminders: List<String>
 )
+
+/**
+ * 生活指数（穿衣 / 防晒 / 运动 / 洗车 / 感冒）。
+ *
+ * 注意：接口本身不返回这些指数，全部由本地规则从实况数据推导，
+ * 因此 UI 上必须标注「本地估算」，不能让用户误以为是官方指数。
+ */
+data class LifeIndex(
+    val key: String,
+    val name: String,
+    /** 适宜 / 较适宜 / 一般 / 较不适宜 / 不适宜 */
+    val level: String,
+    /** 1..5，越大越适宜，用于画点状刻度 */
+    val score: Int,
+    val advice: String
+) {
+    companion object {
+        /** score → 等级文案 */
+        fun levelText(score: Int): String = when (score.coerceIn(1, 5)) {
+            1 -> "不适宜"
+            2 -> "较不适宜"
+            3 -> "一般"
+            4 -> "较适宜"
+            else -> "适宜"
+        }
+    }
+}
 
 /** 用户自定义穿搭模板（Room 持久化） */
 data class CustomOutfitTemplate(

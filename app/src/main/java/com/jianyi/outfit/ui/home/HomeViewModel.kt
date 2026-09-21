@@ -3,9 +3,12 @@ package com.jianyi.outfit.ui.home
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.jianyi.outfit.WeatherOutfitApp
+import com.jianyi.outfit.data.model.ForecastDay
+import com.jianyi.outfit.data.model.LifeIndex
 import com.jianyi.outfit.data.model.OutfitRecommendation
 import com.jianyi.outfit.data.model.UserPreferences
 import com.jianyi.outfit.data.model.WeatherNow
+import com.jianyi.outfit.engine.LifeIndexEngine
 import com.jianyi.outfit.engine.OutfitRecommendationEngine
 import com.jianyi.outfit.notification.Notifier
 import com.jianyi.outfit.util.LocationUtil
@@ -28,6 +31,11 @@ data class HomeUiState(
     val isRefreshing: Boolean = false,     // 下拉/点击刷新
     val weather: WeatherNow? = null,
     val recommendation: OutfitRecommendation? = null,
+    val lifeIndices: List<LifeIndex> = emptyList(),
+    /** 7 日预报，接口按省/市提供；经纬度定位拿不到时为空 */
+    val forecast: List<ForecastDay> = emptyList(),
+    /** 预报为什么没有内容（不静默吞掉，直接写在界面上） */
+    val forecastNote: String? = null,
     val prefs: UserPreferences = UserPreferences(),
     val locationSource: LocationSource = LocationSource.MANUAL,
     val error: String? = null,
@@ -98,10 +106,13 @@ class HomeViewModel(private val app: WeatherOutfitApp) : ViewModel() {
         viewModelScope.launch {
             container.settingsRepository.preferences.collect { prefs ->
                 _uiState.update { state ->
+                    val weather = state.weather
                     state.copy(
                         prefs = prefs,
-                        recommendation = state.weather
-                            ?.let { OutfitRecommendationEngine.recommend(it, prefs) }
+                        recommendation = weather
+                            ?.let { OutfitRecommendationEngine.recommend(it, prefs) },
+                        lifeIndices = weather?.let { LifeIndexEngine.compute(it, prefs) }
+                            ?: emptyList()
                     )
                 }
             }
@@ -218,9 +229,13 @@ class HomeViewModel(private val app: WeatherOutfitApp) : ViewModel() {
                         error = null,
                         rateLimitRetryIn = null,
                         locationSource = source,
-                        recommendation = OutfitRecommendationEngine.recommend(weather, state.prefs)
+                        recommendation = OutfitRecommendationEngine.recommend(weather, state.prefs),
+                        lifeIndices = LifeIndexEngine.compute(weather, state.prefs)
                     )
                 }
+                // 实况到手才可能选景，所以换景必须挂在这里而不是页面里
+                notifyScenery(weather)
+                loadForecast(weather)
                 notifyExtremeWeatherIfNeeded(weather)
             },
             onFailure = { e ->
@@ -268,6 +283,71 @@ class HomeViewModel(private val app: WeatherOutfitApp) : ViewModel() {
     /** GPS 数据源 key（保留两位小数，位置微动不触发重复加载） */
     private fun gpsKey(lat: Double, lon: Double): String =
         String.format(Locale.US, "gps|%.2f|%.2f", lat, lon)
+
+    /** 把实况交给风景控制器，由它决定是否需要换景 */
+    private fun notifyScenery(weather: WeatherNow) {
+        container.sceneryController.onWeather(
+            condition = weather.condition,
+            tempC = weather.feelsLike ?: weather.temperature,
+            hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY),
+            windScale = OutfitRecommendationEngine.parseWindScale(
+                weather.windScaleText, weather.windSpeedMs
+            )
+        )
+    }
+
+    /**
+     * 加载 7 日预报。
+     *
+     * 接口只在「省 + 市」维度提供逐日数据，经纬度端点拿不到省份，
+     * 这种情况下不猜、也不静默留空，而是把原因写在卡片上。
+     */
+    private fun loadForecast(weather: WeatherNow) {
+        if (weather.province.isBlank()) {
+            _uiState.update {
+                it.copy(
+                    forecast = emptyList(),
+                    forecastNote = "当前为经纬度定位，数据源不提供该地逐日预报"
+                )
+            }
+            return
+        }
+        viewModelScope.launch {
+            container.weatherRepository.forecast(weather.province, weather.city).fold(
+                onSuccess = { days ->
+                    _uiState.update {
+                        it.copy(
+                            forecast = days,
+                            forecastNote = if (days.isEmpty()) {
+                                "接口未返回逐日数据，稍后下拉刷新可再试"
+                            } else null
+                        )
+                    }
+                },
+                onFailure = { e ->
+                    _uiState.update { it.copy(forecastNote = friendly(e.message)) }
+                }
+            )
+        }
+    }
+
+    /**
+     * 把上游错误整理成能给人看的一句话。
+     *
+     * 数据源在限流时会返回「…或购买钻石会员！该开发者最高频次限制为 329 次/分钟…」
+     * 这类带推销话术的原文。它是真的，但不该出现在一个免费无广告的应用界面上：
+     * 既误导（用户以为要付费才能用本应用），又和整体语气冲突。
+     * 这里识别出限流语义后换成中性表述，其余错误保留原文以免掩盖真实故障。
+     */
+    private fun friendly(raw: String?): String {
+        val text = raw.orEmpty()
+        return when {
+            text.contains("频次") || text.contains("过快") || text.contains("会员") ->
+                "接口调用频次受限，稍后下拉刷新可再试"
+            text.isBlank() -> "七日预报加载失败"
+            else -> text
+        }
+    }
 
     /** 极端天气预警开关开启时，收到预警立即通知 */
     private suspend fun notifyExtremeWeatherIfNeeded(weather: WeatherNow) {

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  冷启动窗口底色。
+  用「高山静湖」的实测采样色做竖向渐变，Compose 首帧画出来之前屏幕就是这片天光，
+  不会再出现白色闪一下的观感。
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:angle="270"
+                android:centerColor="#C7D7D3"
+                android:endColor="#A3B9B5"
+                android:startColor="#BDCFC6"
+                android:type="linear" />
+        </shape>
+    </item>
+</layer-list>
