@@ -22,6 +22,15 @@ SUSPECTS = [
     (re.compile(r"^\s*import .*\*\s*$"), "wildcard import"),
 ]
 
+# A class header's parameter list is the one place where `val x = ...` at the start of a
+# line is legal (it declares a constructor property). Everything else that opens a paren
+# -- a call like `.then(` -- is expression position, where it is a syntax error.
+CLASS_HEADER = re.compile(
+    r"^\s*(?:@\w+(?:\([^)]*\))?\s*)*"
+    r"(?:public |private |internal |abstract |open |sealed |data |enum |value |inner |annotation |fun |)*"
+    r"(?:class\s+[A-Z]\w*\s*(?:<[^>]*>)?|constructor)\s*\("
+)
+
 
 def scan(text: str):
     """Yield (line, message) problems. Tracks strings and both comment styles."""
@@ -32,6 +41,13 @@ def scan(text: str):
     stack = []
 
     for ln, line in enumerate(text.splitlines(), 1):
+        # Initialised declarations only: `val x = ...` inside an argument list is a
+        # syntax error ("Expecting an expression"), while `val x: T` with no `=` is a
+        # perfectly legal primary-constructor property -- that distinction is what keeps
+        # this from firing 190 times on every enum/data class in the repo.
+        if stack and stack[-1][0] == "(" and not CLASS_HEADER.match(stack[-1][2]) \
+                and re.match(r"\s*(val|var)\s+\w+[^=\n]*=(?!=)", line):
+            yield ln, "initialised val/var inside an argument list - hoist it above the call"
         i = 0
         n = len(line)
         while i < n:
@@ -39,6 +55,14 @@ def scan(text: str):
             if in_block:
                 if c == "*" and i + 1 < n and line[i + 1] == "/":
                     in_block = False
+                    i += 2
+                    continue
+                # Kotlin block comments nest. A `/*` inside KDoc -- most often a path like
+                # `assets/*.png` -- silently swallows the rest of the file and the real error
+                # surfaces hundreds of lines later as "Missing }".
+                if c == "/" and i + 1 < n and line[i + 1] == "*":
+                    yield ln, "nested '/*' inside a block comment - Kotlin nests comments, " \
+                              "this swallows the code below"
                     i += 2
                     continue
                 i += 1
@@ -59,12 +83,12 @@ def scan(text: str):
                 i += 1
                 continue
             if c in "({[":
-                stack.append((c, ln))
+                stack.append((c, ln, line))
             elif c in ")}]":
                 if not stack:
                     yield ln, f"stray '{c}' with nothing to match"
                 else:
-                    opener, oln = stack.pop()
+                    opener, oln, _ = stack.pop()
                     want = pairs[c]
                     if opener != want:
                         yield ln, f"'{c}' closes '{opener}' opened at line {oln}"
@@ -74,8 +98,16 @@ def scan(text: str):
                 continue
             i += 1
 
-    for opener, oln in stack:
+    for opener, oln, _ in stack:
         yield oln, f"unclosed '{opener}'"
+
+
+def rel(path: Path) -> str:
+    """Repo-relative when it is one; absolute otherwise (the tool also takes scratch files)."""
+    try:
+        return str(path.relative_to(REPO))
+    except ValueError:
+        return str(path)
 
 
 def main() -> int:
@@ -91,12 +123,12 @@ def main() -> int:
     for f in files:
         text = f.read_text(encoding="utf-8")
         for ln, msg in scan(text):
-            print(f"{f.relative_to(REPO)}:{ln}: {msg}")
+            print(f"{rel(f)}:{ln}: {msg}")
             problems += 1
         for rx, msg in SUSPECTS:
             for m in rx.finditer(text):
                 ln = text[: m.start()].count("\n") + 1
-                print(f"{f.relative_to(REPO)}:{ln}: {msg}")
+                print(f"{rel(f)}:{ln}: {msg}")
                 problems += 1
 
     print(f"\nchecked {len(files)} files, {problems} problem(s)")

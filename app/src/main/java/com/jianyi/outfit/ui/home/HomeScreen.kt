@@ -73,6 +73,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -88,7 +89,6 @@ import com.jianyi.outfit.ui.glass.GlassIconButton
 import com.jianyi.outfit.ui.glass.GlassRole
 import com.jianyi.outfit.ui.glass.GlassShapes
 import com.jianyi.outfit.ui.glass.GlassSurface
-import com.jianyi.outfit.ui.glass.LocalGlassHost
 import com.jianyi.outfit.ui.glass.glassMaterial
 import com.jianyi.outfit.ui.scenery.LocalSceneryController
 import com.jianyi.outfit.ui.scenery.Scenery
@@ -259,7 +259,10 @@ private fun HomeTopBar(
             .statusBarsPadding()
             .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
-        // 玻璃底：随折叠进度从「几乎不可见」长到「实心导航条」
+        /* 玻璃底：随折叠进度从「几乎不可见」长到「实心导航条」。
+         * bodyAlpha 传的是「折叠到底时」的本体色浓度 —— 整层 alpha 已经跟着折叠在走，
+         * 这里若传 collapse.floatValue 就把滚动状态读进了组合，每帧重组。
+         * 需要本体色而不是「第二份模糊」来压住滚过来的正文，原因见 Glass.kt 文件头。 */
         Box(
             Modifier
                 .matchParentSize()
@@ -268,7 +271,8 @@ private fun HomeTopBar(
                     shape = GlassShapes.bar,
                     emphasis = GlassEmphasis.THIN,
                     role = GlassRole.BAR,
-                    dark = dark
+                    dark = dark,
+                    bodyAlpha = 0.80f
                 )
         )
 
@@ -305,7 +309,11 @@ private fun HomeTopBar(
                 )
             }
 
-            RefreshIconButton(loading = state.isLoading || state.isRefreshing, onClick = onRefresh)
+            RefreshIconButton(
+                loading = state.isLoading || state.isRefreshing,
+                dark = dark,
+                onClick = onRefresh
+            )
             Spacer(Modifier.width(2.dp))
             GlassIconButton(
                 icon = Icons.Filled.Settings,
@@ -337,9 +345,20 @@ private fun LocationBadge(source: LocationSource) {
     }
 }
 
-/** 刷新按钮：加载中时图标匀速旋转 */
+/** 刷新按钮：仅在真正加载时才把无限动画挂进组合，平时一帧都不空转 */
 @Composable
-private fun RefreshIconButton(loading: Boolean, onClick: () -> Unit) {
+private fun RefreshIconButton(loading: Boolean, dark: Boolean, onClick: () -> Unit) {
+    GlassIconButton(
+        icon = Icons.Filled.Refresh,
+        contentDescription = "刷新",
+        onClick = onClick,
+        dark = dark,
+        modifier = if (loading) Modifier.spinWhileLoading() else Modifier
+    )
+}
+
+@Composable
+private fun Modifier.spinWhileLoading(): Modifier {
     val transition = rememberInfiniteTransition(label = "refresh")
     val angle by transition.animateFloat(
         initialValue = 0f,
@@ -347,12 +366,8 @@ private fun RefreshIconButton(loading: Boolean, onClick: () -> Unit) {
         animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing)),
         label = "angle"
     )
-    GlassIconButton(
-        icon = Icons.Filled.Refresh,
-        contentDescription = "刷新",
-        onClick = onClick,
-        modifier = if (loading) Modifier.graphicsLayer { rotationZ = angle } else Modifier
-    )
+    // 只在图层里读：读到组合层就会让整棵顶栏每帧重组
+    return graphicsLayer { rotationZ = angle }
 }
 
 /* ============ 正文 ============ */
@@ -391,9 +406,11 @@ private fun HomeContent(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = "当前为 IP 粗略定位，城市可能有偏差 · 点此用 GPS 精确定位",
+                    text = "IP 粗略定位，城市可能有偏差 · 点此改用 GPS",
                     style = MaterialTheme.typography.bodyMedium,
                     color = onColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
             }

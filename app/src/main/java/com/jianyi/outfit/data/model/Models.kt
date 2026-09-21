@@ -116,19 +116,25 @@ enum class SceneryMode(val label: String) {
 
 /**
  * 玻璃模糊档位。
- * 真实背景模糊（Android 12+ RenderEffect）每一层都要过一次 GPU，
- * 在低端机上会直接吃掉帧率，因此把「好不好看」和「流不流畅」拆开交给用户：
- * - REALTIME   ：卡片与顶栏都做实时模糊，最贴近液态玻璃，需较强 GPU
- * - BALANCED   ：仅顶栏/浮层实时模糊，卡片用静态磨砂（默认，观感与帧率平衡）
- * - PERFORMANCE：全部静态磨砂，零运行时模糊开销，省电且必然满帧
+ *
+ * 真实背景模糊（Android 12+ RenderEffect）每一层都要过一次 GPU，所以把
+ * 「好不好看」和「流不流畅」拆开交给用户。默认是 REALTIME —— 液态玻璃本来就是
+ * 靠「能看穿背景」成立的，卡片一旦改用静态着色就退化成一块灰色圆角板。
+ * 早先在 Android 11 / 60Hz 的测试机上默认给的是 BALANCED，那台机器既没有
+ * RenderEffect 也撑不住全屏多图层模糊；现在的支持面变了，默认值跟着变。
+ * 系统低于 Android 12 时 [GlassHost] 会自行逐级降级，不会因为选了 REALTIME 而白屏。
+ *
+ * - REALTIME   ：卡片与顶栏都做实时模糊，最贴近液态玻璃（默认）
+ * - BALANCED   ：仅顶栏/浮层实时模糊，卡片用静态着色
+ * - PERFORMANCE：全部静态着色，零运行时模糊开销，省电且必然满帧
  */
 enum class GlassQuality(val label: String, val desc: String) {
-    REALTIME("全实时", "卡片与顶栏都实时采样背景，最通透"),
-    BALANCED("均衡", "顶栏实时模糊，卡片用静态磨砂"),
-    PERFORMANCE("流畅优先", "全部静态磨砂，省电且不掉帧");
+    REALTIME("全实时", "卡片与顶栏都实时采样背景，最通透（推荐）"),
+    BALANCED("均衡", "顶栏实时模糊，卡片用静态着色"),
+    PERFORMANCE("流畅优先", "全部静态着色，省电且不掉帧");
 
     companion object {
-        fun safe(value: String?) = entries.firstOrNull { it.name == value } ?: BALANCED
+        fun safe(value: String?) = entries.firstOrNull { it.name == value } ?: REALTIME
     }
 }
 
@@ -146,12 +152,12 @@ data class UserPreferences(
     val sceneryMode: SceneryMode = SceneryMode.AUTO_WEATHER,
     /** Scenery.key；sceneryMode = FIXED 时生效，为空表示尚未选择 */
     val sceneryKey: String? = null,
-    val glassQuality: GlassQuality = GlassQuality.BALANCED,
+    val glassQuality: GlassQuality = GlassQuality.REALTIME,
     /** 滚动视差：背景随列表反向位移，制造纵深 */
     val parallaxEnabled: Boolean = true,
     /** 呼吸漂移：背景做极缓慢的缩放漂移，画面不「死」 */
     val breathingEnabled: Boolean = true,
-    /** 高帧率：向系统请求以屏幕最高刷新率渲染动画（Android 12+） */
+    /** 高帧率：向系统申请以最高刷新率档位渲染（帧率类别 API 需 Android 15+） */
     val highFrameRateEnabled: Boolean = true
 ) {
     companion object {

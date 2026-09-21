@@ -74,6 +74,7 @@ import com.jianyi.outfit.ui.glass.GlassRole
 import com.jianyi.outfit.ui.glass.GlassShapes
 import com.jianyi.outfit.ui.glass.GlassSurface
 import com.jianyi.outfit.ui.glass.glassMaterial
+import com.jianyi.outfit.ui.glass.supportsRealtimeBlur
 import com.jianyi.outfit.ui.theme.MotionSpecs
 import com.jianyi.outfit.util.FrameRate
 import com.jianyi.outfit.ui.scenery.LocalSceneryController
@@ -219,7 +220,11 @@ fun SettingsScreen(
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = GlassQuality.entries[state.prefs.glassQuality.ordinal].desc,
+                    text = if (!supportsRealtimeBlur) {
+                        "本机系统低于 Android 12，没有真实背景模糊能力，三档均为静态着色"
+                    } else {
+                        GlassQuality.entries[state.prefs.glassQuality.ordinal].desc
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -484,7 +489,8 @@ private fun Modifier.glassBar(dark: Boolean): Modifier = glassMaterial(
     shape = GlassShapes.bar,
     emphasis = GlassEmphasis.THIN,
     role = GlassRole.BAR,
-    dark = dark
+    dark = dark,
+    bodyAlpha = 0.72f
 )
 
 /** 输入框在玻璃上要透明底，否则会露出一块不透明的白矩形 */

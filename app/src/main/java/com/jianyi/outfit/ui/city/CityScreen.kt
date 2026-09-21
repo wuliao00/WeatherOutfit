@@ -242,7 +242,8 @@ fun CityScreen(
                         shape = GlassShapes.bar,
                         emphasis = GlassEmphasis.THIN,
                         role = GlassRole.BAR,
-                        dark = dark
+                        dark = dark,
+                        bodyAlpha = 0.72f
                     )
             )
             Row(
