@@ -1,20 +1,28 @@
 package com.jianyi.outfit.ui.detail
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -27,47 +35,61 @@ import androidx.compose.material.icons.filled.Weekend
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.jianyi.outfit.data.model.CustomOutfitTemplate
 import com.jianyi.outfit.data.model.OutfitPlan
+import com.jianyi.outfit.data.model.OutfitRecommendation
 import com.jianyi.outfit.di.AppViewModelProvider
 import com.jianyi.outfit.engine.OutfitRecommendationEngine
 import com.jianyi.outfit.ui.components.EmptyHint
+import com.jianyi.outfit.ui.glass.GlassEmphasis
+import com.jianyi.outfit.ui.glass.GlassIconButton
+import com.jianyi.outfit.ui.glass.GlassRole
+import com.jianyi.outfit.ui.glass.GlassShapes
+import com.jianyi.outfit.ui.glass.GlassSurface
+import com.jianyi.outfit.ui.glass.glassMaterial
+import com.jianyi.outfit.ui.theme.LocalScenery
+import com.jianyi.outfit.ui.theme.MotionSpecs
+import kotlinx.coroutines.launch
 
 /**
- * 穿搭详情页：按场景（通勤 / 户外 / 休闲）展示方案，
- * 支持勾选已拥有单品、管理自定义穿搭模板（新增 / 左滑删除）。
+ * 穿搭详情页。
+ *
+ * 三套场景用 HorizontalPager 而不是三个 Tab：
+ * 手指拖动时页面本身跟手，指示器再读同一个 pagerState 的 offsetFraction，
+ * 两者天然同步——不需要「点击后动画追上」这一步。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -77,7 +99,11 @@ fun OutfitDetailScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    var showAddDialog by rememberSaveable { mutableStateOf(false) }
+    var showAddDialog by androidx.compose.runtime.saveable.rememberSaveable {
+        mutableStateOf(false)
+    }
+    val scenery = LocalScenery.current
+    val dark = scenery.dark || isSystemInDarkTheme()
 
     LaunchedEffect(state.message) {
         state.message?.let {
@@ -86,82 +112,83 @@ fun OutfitDetailScreen(
         }
     }
 
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
-            TopAppBar(
-                title = { Text("穿搭方案", style = MaterialTheme.typography.headlineMedium) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "返回"
-                        )
-                    }
-                }
-            )
-        }
-    ) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                top = innerPadding.calculateTopPadding(),
-                start = 20.dp,
-                end = 20.dp,
-                bottom = 24.dp
-            ),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+    Box(Modifier.fillMaxSize()) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 18.dp)
         ) {
-            val recommendation = state.recommendation
-            if (recommendation == null) {
-                item { EmptyHint("暂无推荐，请先返回首页加载天气数据") }
-            } else {
-                item {
-                    ScenePlansSection(
-                        recommendation = recommendation,
-                        temperatureText = state.weather?.let {
-                            com.jianyi.outfit.util.Formatters.temp(it.temperature, state.prefs.tempUnit)
-                        } ?: ""
-                    )
-                }
+            Spacer(Modifier.statusBarsPadding().height(60.dp))
+
+            state.recommendation?.let { rec ->
+                ScenePager(
+                    recommendation = rec,
+                    temperatureText = state.weather?.let {
+                        com.jianyi.outfit.util.Formatters.temp(it.temperature, state.prefs.tempUnit)
+                    } ?: "",
+                    dark = dark
+                )
+                Spacer(Modifier.height(14.dp))
             }
 
-            // ===== 我的模板 =====
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "我的模板",
-                        style = MaterialTheme.typography.titleLarge
+            TemplatesSection(
+                templates = state.templates,
+                dark = dark,
+                onAdd = { showAddDialog = true },
+                onDelete = viewModel::deleteTemplate
+            )
+
+            Spacer(Modifier.height(30.dp).navigationBarsPadding())
+        }
+
+        // 悬浮玻璃顶栏，与首页同一套语言
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .glassMaterial(
+                        shape = GlassShapes.bar,
+                        emphasis = GlassEmphasis.THIN,
+                        role = GlassRole.BAR,
+                        dark = dark
                     )
-                    TextButton(onClick = { showAddDialog = true }) {
-                        Icon(
-                            imageVector = Icons.Filled.Add,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text("自定义方案")
-                    }
-                }
-            }
-            if (state.templates.isEmpty()) {
-                item { EmptyHint("暂无自定义模板，长按首页推荐卡片或点击“自定义方案”新建") }
-            } else {
-                items(state.templates, key = { it.id }) { template ->
-                    TemplateItem(
-                        template = template,
-                        onDelete = { viewModel.deleteTemplate(template.id) }
-                    )
-                }
+            )
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 4.dp, end = 6.dp, top = 5.dp, bottom = 5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                GlassIconButton(
+                    icon = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "返回",
+                    onClick = onBack,
+                    dark = dark
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = "穿搭方案",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
             }
         }
+
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 10.dp)
+        )
     }
 
-    // 新增自定义模板对话框
     if (showAddDialog) {
         AddTemplateDialog(
             onDismiss = { showAddDialog = false },
@@ -173,79 +200,159 @@ fun OutfitDetailScreen(
     }
 }
 
-/** 场景方案区：场景切换 + 单品清单（可勾选） + 小贴士 */
+/* ============ 场景横滑 ============ */
+
 @Composable
-private fun ScenePlansSection(
-    recommendation: com.jianyi.outfit.data.model.OutfitRecommendation,
-    temperatureText: String
+private fun ScenePager(
+    recommendation: OutfitRecommendation,
+    temperatureText: String,
+    dark: Boolean
 ) {
     val plans = recommendation.plans
-    var selectedScene by rememberSaveable(plans.firstOrNull()?.scene) {
-        mutableStateOf(plans.firstOrNull()?.scene ?: OutfitRecommendationEngine.SCENE_COMMUTE)
-    }
-    val selectedPlan = plans.firstOrNull { it.scene == selectedScene } ?: plans.first()
+    if (plans.isEmpty()) return
+    val scope = rememberCoroutineScope()
+    val pagerState = rememberPagerState(pageCount = { plans.size })
+    var trackWidthPx by remember { mutableIntStateOf(0) }
 
-    Surface(
+    GlassSurface(
         modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceContainer
+        emphasis = GlassEmphasis.REGULAR,
+        role = GlassRole.CARD,
+        dark = dark,
+        contentPadding = PaddingValues(18.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            // 场景切换
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                plans.forEach { plan ->
-                    FilterChip(
-                        selected = plan.scene == selectedScene,
-                        onClick = { selectedScene = plan.scene },
-                        label = { Text(plan.scene) },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = sceneIcon(plan.scene),
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
+        Column {
+            // ---- 分段选择器：滑块位置直接读 pager 的连续偏移 ----
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(38.dp)
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(1f / plans.size)
+                        .fillMaxHeight()
+                        .padding(3.dp)
+                        .graphicsLayer {
+                            if (trackWidthPx > 0) {
+                                val seg = trackWidthPx / plans.size
+                                translationX =
+                                    (pagerState.currentPage + pagerState.currentPageOffsetFraction) * seg
+                            }
                         }
-                    )
+                        .glassMaterial(
+                            shape = RoundedCornerShape(15.dp),
+                            emphasis = GlassEmphasis.THIN,
+                            role = GlassRole.CARD,
+                            dark = dark
+                        )
+                )
+                Row(
+                    Modifier
+                        .fillMaxSize()
+                        .onSizeChanged { trackWidthPx = it.width }
+                ) {
+                    plans.forEachIndexed { index, plan ->
+                        val selected = pagerState.currentPage == index
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .clickable {
+                                    scope.launch { pagerState.animateScrollToPage(index) }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = sceneIcon(plan.scene),
+                                    contentDescription = null,
+                                    tint = if (selected) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(Modifier.width(5.dp))
+                                Text(
+                                    text = plan.scene,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                                    color = if (selected) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
-            // 场景信息
-            Text(
-                text = "${selectedPlan.scene} · 适配 ${selectedPlan.tempRange} · 当前 $temperatureText",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Spacer(Modifier.height(14.dp))
 
-            // 穿搭清单（可勾选已拥有单品）
-            ChecklistPanel(plan = selectedPlan)
+            /**
+             * 页高取「各页实测高度的最大值」。
+             *
+             * 三套方案的单品数量不同（通勤 3 件、户外可能 6 件），写死高度会把
+             * 内容较长的那页直接裁掉，真机上就出现过小贴士和下方提示文字叠在一起。
+             * 用 onSizeChanged 收集每页高度再取最大值，页面之间切换时高度保持稳定，
+             * 不会因为翻到短页就整个卡片缩一下。
+             */
+            var pageHeightPx by remember { mutableIntStateOf(0) }
 
-            // 小贴士
-            Surface(
-                shape = MaterialTheme.shapes.small,
-                color = MaterialTheme.colorScheme.secondaryContainer
-            ) {
-                Text(
-                    text = "小贴士：${selectedPlan.tip}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.padding(12.dp)
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(
+                        with(androidx.compose.ui.platform.LocalDensity.current) {
+                            // 首帧还没测到高度时给一个够用的兜底，避免高度从 0 弹开
+                            (if (pageHeightPx > 0) pageHeightPx else 320.dp.toPx().toInt()).toDp()
+                        }
+                    ),
+                pageSpacing = 14.dp,
+                beyondViewportPageCount = 1
+            ) { page ->
+                ScenePage(
+                    plan = plans[page],
+                    temperatureText = temperatureText,
+                    dark = dark,
+                    onHeightMeasured = { h -> if (h > pageHeightPx) pageHeightPx = h }
                 )
             }
 
-            // 出行提醒
-            if (recommendation.reminders.isNotEmpty()) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = "出行提醒",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Medium
-                    )
-                    recommendation.reminders.take(4).forEach { reminder ->
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = "左右滑动切换场景",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+
+    if (recommendation.reminders.isNotEmpty()) {
+        Spacer(Modifier.height(14.dp))
+        GlassSurface(
+            modifier = Modifier.fillMaxWidth(),
+            emphasis = GlassEmphasis.THIN,
+            role = GlassRole.CARD,
+            dark = dark,
+            contentPadding = PaddingValues(18.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(
+                    text = "出行提醒",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                recommendation.reminders.take(4).forEach { reminder ->
+                    Row {
                         Text(
-                            text = "· $reminder",
+                            text = "·",
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(end = 8.dp)
+                        )
+                        Text(
+                            text = reminder,
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -256,38 +363,157 @@ private fun ScenePlansSection(
     }
 }
 
+@Composable
+private fun ScenePage(
+    plan: OutfitPlan,
+    temperatureText: String,
+    dark: Boolean,
+    onHeightMeasured: (Int) -> Unit
+) {
+    /**
+     * 这里必须是 fillMaxWidth 而不是 fillMaxSize。
+     *
+     * 页高由「各页实测高度的最大值」决定，如果页面又去填满容器，
+     * 量到的高度就恒等于容器高度，永远长不起来 —— 布局反馈死循环。
+     * 同理不能在这里再套一层 verticalScroll：外层页面本身已经可竖滚。
+     */
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .onSizeChanged { onHeightMeasured(it.height) }
+    ) {
+        Text(
+            text = "${plan.scene} · 适配 ${plan.tempRange}" +
+                if (temperatureText.isNotBlank()) " · 当前 $temperatureText" else "",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(10.dp))
+        ChecklistPanel(plan = plan)
+        Spacer(Modifier.height(12.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .clip(GlassShapes.inner)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                .padding(12.dp)
+        ) {
+            Text(
+                text = "小贴士：${plan.tip}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+    }
+}
+
 /** 单品清单：勾选状态仅在当前会话内记忆 */
 @Composable
 private fun ChecklistPanel(plan: OutfitPlan) {
     val checked = remember(plan.scene) { mutableStateMapOf<String, Boolean>() }
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("穿搭清单（勾选已备好）", style = MaterialTheme.typography.titleMedium)
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            "穿搭清单（勾选已备好）",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(Modifier.height(4.dp))
         plan.items.forEach { item ->
+            val on = checked[item] == true
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { checked[item] = !on }
+                    .padding(vertical = 2.dp)
             ) {
-                Checkbox(
-                    checked = checked[item] == true,
-                    onCheckedChange = { checked[item] = it }
-                )
+                Checkbox(checked = on, onCheckedChange = { checked[item] = it })
                 Text(
                     text = item,
                     style = MaterialTheme.typography.bodyLarge,
-                    color = if (checked[item] == true) {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    }
+                    color = if (on) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.onSurface
                 )
             }
         }
     }
 }
 
-/** 模板条目：左滑删除 */
+/* ============ 我的模板 ============ */
+
 @Composable
-private fun TemplateItem(template: CustomOutfitTemplate, onDelete: () -> Unit) {
+private fun TemplatesSection(
+    templates: List<CustomOutfitTemplate>,
+    dark: Boolean,
+    onAdd: () -> Unit,
+    onDelete: (Long) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = "我的模板",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "自定义",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(Modifier.width(2.dp))
+            GlassIconButton(
+                icon = Icons.Filled.Add,
+                contentDescription = "新建模板",
+                onClick = onAdd,
+                size = 34.dp,
+                dark = dark
+            )
+        }
+    }
+    Spacer(Modifier.height(10.dp))
+
+    if (templates.isEmpty()) {
+        GlassSurface(
+            modifier = Modifier.fillMaxWidth(),
+            emphasis = GlassEmphasis.ULTRA_THIN,
+            dark = dark,
+            contentPadding = PaddingValues(20.dp)
+        ) {
+            EmptyHint("还没有模板。长按首页穿搭卡片即可把今天的方案存下来。")
+        }
+    } else {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            templates.forEach { template ->
+                TemplateItem(
+                    template = template,
+                    dark = dark,
+                    onDelete = { onDelete(template.id) }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 模板条目：左滑删除。
+ *
+ * 手势直接交给 Material3 的 SwipeToDismissBox —— 它本身就是跟手的
+ * （位移由手指驱动，不是「松手才开始动」），自己重写一遍只会更差。
+ * 这里只把露出的底衬换成与主题一致的删除样式。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TemplateItem(
+    template: CustomOutfitTemplate,
+    dark: Boolean,
+    onDelete: () -> Unit
+) {
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
             if (value == SwipeToDismissBoxValue.EndToStart) {
@@ -298,47 +524,49 @@ private fun TemplateItem(template: CustomOutfitTemplate, onDelete: () -> Unit) {
             }
         }
     )
+
     SwipeToDismissBox(
         state = dismissState,
         enableDismissFromStartToEnd = false,
         backgroundContent = {
             Box(
-                modifier = Modifier
+                Modifier
                     .fillMaxSize()
-                    .padding(vertical = 4.dp),
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f)),
                 contentAlignment = Alignment.CenterEnd
             ) {
-                Surface(
-                    shape = MaterialTheme.shapes.medium,
-                    color = MaterialTheme.colorScheme.errorContainer
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Delete,
-                        contentDescription = "删除",
-                        tint = MaterialTheme.colorScheme.onErrorContainer,
-                        modifier = Modifier.padding(16.dp)
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Filled.Delete,
+                    contentDescription = "删除",
+                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.padding(end = 26.dp)
+                )
             }
         }
     ) {
-        Surface(
-            shape = MaterialTheme.shapes.medium,
-            color = MaterialTheme.colorScheme.surfaceContainer,
+        GlassSurface(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 4.dp)
+                .padding(vertical = 4.dp),
+            emphasis = GlassEmphasis.THIN,
+            dark = dark,
+            contentPadding = PaddingValues(16.dp)
         ) {
-            Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(template.name, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        template.name,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
                     Text(
                         text = template.scene,
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
@@ -350,7 +578,7 @@ private fun TemplateItem(template: CustomOutfitTemplate, onDelete: () -> Unit) {
                 if (template.tip.isNotBlank()) {
                     Text(
                         text = template.tip,
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -359,7 +587,8 @@ private fun TemplateItem(template: CustomOutfitTemplate, onDelete: () -> Unit) {
     }
 }
 
-/** 新增自定义模板对话框 */
+/* ============ 新增模板对话框 ============ */
+
 @Composable
 private fun AddTemplateDialog(
     onDismiss: () -> Unit,
@@ -369,12 +598,14 @@ private fun AddTemplateDialog(
         items: List<String>, tip: String
     ) -> Unit
 ) {
-    var name by rememberSaveable { mutableStateOf("") }
-    var scene by rememberSaveable { mutableStateOf(OutfitRecommendationEngine.SCENE_COMMUTE) }
-    var minTemp by rememberSaveable { mutableStateOf("10") }
-    var maxTemp by rememberSaveable { mutableStateOf("25") }
-    var itemsText by rememberSaveable { mutableStateOf("") }
-    var tip by rememberSaveable { mutableStateOf("") }
+    var name by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    var scene by androidx.compose.runtime.saveable.rememberSaveable {
+        mutableStateOf(OutfitRecommendationEngine.SCENE_COMMUTE)
+    }
+    var minTemp by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("10") }
+    var maxTemp by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("25") }
+    var itemsText by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    var tip by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -396,10 +627,20 @@ private fun AddTemplateDialog(
                         OutfitRecommendationEngine.SCENE_OUTDOOR,
                         OutfitRecommendationEngine.SCENE_CASUAL
                     ).forEach { option ->
-                        FilterChip(
-                            selected = scene == option,
-                            onClick = { scene = option },
-                            label = { Text(option) }
+                        val selected = scene == option
+                        Text(
+                            text = option,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(
+                                    if (selected) MaterialTheme.colorScheme.primaryContainer
+                                    else Color.Transparent
+                                )
+                                .clickable { scene = option }
+                                .padding(horizontal = 14.dp, vertical = 7.dp)
                         )
                     }
                 }
@@ -452,9 +693,7 @@ private fun AddTemplateDialog(
                 enabled = name.isNotBlank() && itemsText.isNotBlank()
             ) { Text("保存") }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
     )
 }
 

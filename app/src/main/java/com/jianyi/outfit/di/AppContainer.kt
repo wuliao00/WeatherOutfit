@@ -13,6 +13,7 @@ import com.jianyi.outfit.data.repository.SettingsRepositoryImpl
 import com.jianyi.outfit.data.repository.WeatherRepository
 import com.jianyi.outfit.data.repository.WeatherRepositoryImpl
 import com.jianyi.outfit.util.LocationUtil
+import com.jianyi.outfit.ui.scenery.SceneryController
 
 /**
  * 手动依赖容器（项目体量小，不引入 Hilt 等框架）。
@@ -49,4 +50,14 @@ class AppContainer(context: Context) {
 
     /** 定位工具 */
     val locationUtil: LocationUtil = LocationUtil(context.applicationContext)
+
+    /**
+     * 风景背景控制器（全应用单例）。
+     * 背景必须跨页面连续，所以不能放进各页的 ViewModel。
+     *
+     * 注意这里不放天气快照：详情页统一按导航携带的缓存 key 从仓库读，
+     * 全 app 不留可变单例，避免 null / 旧值竞态。
+     */
+    val sceneryController: SceneryController = SceneryController()
+
 }

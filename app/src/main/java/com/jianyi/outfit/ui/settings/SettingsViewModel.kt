@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.jianyi.outfit.WeatherOutfitApp
 import com.jianyi.outfit.data.model.Gender
+import com.jianyi.outfit.data.model.GlassQuality
+import com.jianyi.outfit.data.model.SceneryMode
 import com.jianyi.outfit.data.model.StylePreference
 import com.jianyi.outfit.data.model.TempUnit
 import com.jianyi.outfit.data.model.ToleranceLevel
@@ -97,6 +99,7 @@ class SettingsViewModel(private val app: WeatherOutfitApp) : ViewModel() {
         viewModelScope.launch { container.settingsRepository.setExtremeAlert(enabled) }
     }
 
+
     /** 保存用户自填的 API 凭证（空值 = 清除自填，回退内置默认凭证） */
     fun saveApiCredentials(id: String, key: String, apiUrl: String) {
         viewModelScope.launch {
@@ -111,6 +114,40 @@ class SettingsViewModel(private val app: WeatherOutfitApp) : ViewModel() {
                 )
             }
         }
+    }
+
+/* ============ 视觉与性能 ============ */
+
+    fun setSceneryMode(mode: SceneryMode) {
+        viewModelScope.launch { container.settingsRepository.setSceneryMode(mode) }
+    }
+
+    /**
+     * 选一张固定风景。
+     * 同时把模式切到 FIXED —— 否则用户选完，下次刷新天气又被自动换掉，
+     * 那会让人以为设置没生效。
+     */
+    fun pinScenery(key: String) {
+        viewModelScope.launch {
+            container.settingsRepository.setSceneryMode(SceneryMode.FIXED)
+            container.settingsRepository.setSceneryKey(key)
+        }
+    }
+
+    fun setGlassQuality(quality: GlassQuality) {
+        viewModelScope.launch { container.settingsRepository.setGlassQuality(quality) }
+    }
+
+    fun setParallax(enabled: Boolean) {
+        viewModelScope.launch { container.settingsRepository.setParallaxEnabled(enabled) }
+    }
+
+    fun setBreathing(enabled: Boolean) {
+        viewModelScope.launch { container.settingsRepository.setBreathingEnabled(enabled) }
+    }
+
+    fun setHighFrameRate(enabled: Boolean) {
+        viewModelScope.launch { container.settingsRepository.setHighFrameRateEnabled(enabled) }
     }
 
     /** 重置免责声明确认状态：下次启动重新弹出使用须知 */

@@ -33,3 +33,29 @@ val DarkOnPrimary = Color(0xFF16283F)
 val DarkPrimaryContainer = Color(0xFF2A3A55)
 val DarkOnPrimaryContainer = Color(0xFFD7E0EE)
 val DarkOutline = Color(0xFF8E9199)
+
+/* ============ 液态玻璃材质 ============
+ * 玻璃本身不上色，靠「半透明底色 + 高光描边 + 内阴影」三层叠加出体积感。
+ * 真实模糊由 Haze 提供（Android 12+ RenderEffect），此处只定义材质参数。
+ */
+/** 浅色模式玻璃底色：接近白的冷灰，透明度 62% 时仍能透出背景轮廓 */
+val GlassTintLight = Color(0xFFFFFFFF)
+
+/** 深色模式玻璃底色：带一点蓝的深灰，避免纯黑导致描边发灰 */
+val GlassTintDark = Color(0xFF1B2129)
+
+/** 玻璃上缘高光（模拟环境光打在玻璃上沿） */
+val GlassHighlight = Color(0xFFFFFFFF)
+
+/** 玻璃描边：浅色下用白、深色下用低透明白，形成 1px 亮边 */
+val GlassBorderLight = Color(0x66FFFFFF)
+val GlassBorderDark = Color(0x33FFFFFF)
+
+/** 玻璃投影：低而散，避免在风景背景上出现脏色块 */
+val GlassShadow = Color(0x2E0B1620)
+
+/** 背景遮罩：保证玻璃上的文字在任何风景下都有足够对比度 */
+val ScrimLightTop = Color(0x24FFFFFF)
+val ScrimLightBottom = Color(0x66FFFFFF)
+val ScrimDarkTop = Color(0x40000000)
+val ScrimDarkBottom = Color(0xA8000000)

@@ -1,11 +1,13 @@
 [versions]
 agp = "8.7.3"
-kotlin = "2.0.21"
-ksp = "2.0.21-1.0.27"
+# Kotlin/KSP/Compose BOM 三者必须同代：Haze 1.6 依赖 Compose 1.8 + kotlin-stdlib 2.1，
+# 只升 Haze 不升 Kotlin 会出现「二进制元数据版本高于编译器」的硬错误。
+kotlin = "2.1.0"
+ksp = "2.1.0-1.0.29"
 coreKtx = "1.15.0"
 lifecycle = "2.8.7"
-activityCompose = "1.9.3"
-composeBom = "2024.12.01"
+activityCompose = "1.10.1"
+composeBom = "2025.06.01"
 navigationCompose = "2.8.5"
 room = "2.6.1"
 retrofit = "2.11.0"
@@ -16,6 +18,10 @@ datastore = "1.1.1"
 work = "2.9.1"
 playServicesLocation = "21.3.0"
 junit = "4.13.2"
+# 液态玻璃：Compose 真实背景模糊（backdrop blur），Android 12+ 走 RenderEffect，低版本自动降级
+haze = "1.6.10"
+# 启动屏：与风景背景衔接，消除冷启动白/黑闪
+splashscreen = "1.0.1"
 
 [libraries]
 # AndroidX 基础
@@ -33,6 +39,15 @@ androidx-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
 androidx-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
 androidx-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
+androidx-compose-animation = { group = "androidx.compose.animation", name = "animation" }
+androidx-compose-foundation = { group = "androidx.compose.foundation", name = "foundation" }
+
+# 液态玻璃（背景模糊）
+haze-core = { group = "dev.chrisbanes.haze", name = "haze", version.ref = "haze" }
+haze-materials = { group = "dev.chrisbanes.haze", name = "haze-materials", version.ref = "haze" }
+
+# 启动屏
+androidx-core-splashscreen = { group = "androidx.core", name = "core-splashscreen", version.ref = "splashscreen" }
 
 # 导航
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }

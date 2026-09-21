@@ -242,7 +242,9 @@ fun WeatherResponse.toDomain(): WeatherNow {
                     effective = item.effective ?: ""
                 )
             }
-        }
+        },
+        // 地址/IP 端点只在 nowinfo 里给气压，能见度与云量不提供
+        pressureHpa = nowinfo?.pressure
     ).let { weather ->
         // 紫外线等级文案依赖指数，构建后回填
         weather.copy(uvLevel = OutfitRecommendationEngine.uvLevelText(weather.uvIndex))
@@ -300,7 +302,12 @@ fun LatLonWeatherResponse.toDomain(): WeatherNow {
         uvIndex = OutfitRecommendationEngine.estimateUvIndex(condition, hour),
         uvLevel = "",
         updateTime = updateTimeText,
-        alarms = emptyList()
+        alarms = emptyList(),
+        pressureHpa = pressure,
+        visibilityM = visibility,
+        cloudCover = clouds,
+        sunriseAt = sunrise,
+        sunsetAt = sunset
     ).let { weather ->
         weather.copy(uvLevel = OutfitRecommendationEngine.uvLevelText(weather.uvIndex))
     }

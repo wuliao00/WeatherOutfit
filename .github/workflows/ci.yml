@@ -5,6 +5,14 @@ on:
     branches: [ "main", "master" ]
   pull_request:
     branches: [ "main", "master" ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -23,6 +31,57 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
+
+      # local.properties 不进版本库，CI 上必须自己写出来：
+      # 一是 SDK 路径，二是天气凭证。不配 secrets 时退回内置公共凭证，
+      # 构建照样过，但线上必然被限流——所以这里显式打印用的是哪一种。
+      - name: Write local.properties
+        env:
+          WEATHER_API_ID: ${{ secrets.WEATHER_API_ID }}
+          WEATHER_API_KEY: ${{ secrets.WEATHER_API_KEY }}
+        run: |
+          {
+            echo "sdk.dir=${ANDROID_HOME}"
+            echo "WEATHER_API_ID=${WEATHER_API_ID:-88888888}"
+            echo "WEATHER_API_KEY=${WEATHER_API_KEY:-88888888}"
+          } > local.properties
+          if [ -z "$WEATHER_API_ID" ]; then
+            echo "::warning::未配置 WEATHER_API_ID/KEY，使用公共演示凭证（共享频次，不可用于发布）"
+          fi
 
       - name: Lint, Test and Assemble Debug
         run: ./gradlew lint testDebugUnitTest assembleDebug
+
+      # release 签名依赖 secrets；未配置时产出未签名包，
+      # 用来验证 R8 混淆与资源收缩没有裁坏功能，而不是让 CI 直接变红。
+      - name: Detect release keystore secret
+        id: keystore
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: echo "present=$([ -n "$RELEASE_KEYSTORE_BASE64" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - name: Decode release keystore
+        if: steps.keystore.outputs.present == 'true'
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > "${{ runner.temp }}/release.jks"
+
+      - name: Assemble Release
+        env:
+          RELEASE_KEYSTORE_PATH: ${{ steps.keystore.outputs.present == 'true' && format('{0}/release.jks', runner.temp) || '' }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: ./gradlew assembleRelease --stacktrace
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: apks
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 14
