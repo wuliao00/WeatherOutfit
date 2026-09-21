@@ -75,6 +75,7 @@ import com.jianyi.outfit.ui.glass.GlassShapes
 import com.jianyi.outfit.ui.glass.GlassSurface
 import com.jianyi.outfit.ui.glass.glassMaterial
 import com.jianyi.outfit.ui.theme.MotionSpecs
+import com.jianyi.outfit.util.FrameRate
 import com.jianyi.outfit.ui.scenery.LocalSceneryController
 import com.jianyi.outfit.ui.scenery.SceneryGrid
 import com.jianyi.outfit.ui.scenery.SceneryStrip
@@ -225,7 +226,13 @@ fun SettingsScreen(
                 Spacer(Modifier.height(6.dp))
                 SwitchRow(
                     title = "高帧率渲染",
-                    subtitle = "向系统请求以屏幕最高刷新率绘制动画（Android 12+ 生效，更费电）",
+                    // 申请通道要 Android 15+ 才有；旧系统上这个开关确实无效，
+                    // 与其默默失效，不如直接说明，省得用户开了又疑惑为什么没变化
+                    subtitle = if (FrameRate.isSupported) {
+                        "向系统请求以屏幕最高刷新率绘制动画（更费电）"
+                    } else {
+                        "本机系统未提供帧率申请通道（需 Android 15+），此项暂不生效"
+                    },
                     checked = state.prefs.highFrameRateEnabled,
                     onCheckedChange = viewModel::setHighFrameRate,
                     dark = dark

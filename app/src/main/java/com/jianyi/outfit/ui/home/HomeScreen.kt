@@ -54,6 +54,7 @@ import androidx.compose.runtime.FloatState
 import androidx.compose.runtime.MutableFloatState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -910,7 +911,8 @@ private fun RateLimitPanel(
     onManualRetry: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var remaining by androidx.compose.runtime.mutableIntStateOf(retryInSec)
+    // 必须 remember：否则每次重组都会把倒计时重置回初始值，卡片会卡在同一个数字
+    var remaining by remember(retryInSec) { mutableIntStateOf(retryInSec) }
     val scenery = LocalScenery.current
     val dark = scenery.dark || isSystemInDarkTheme()
 
