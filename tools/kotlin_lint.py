@@ -22,6 +22,40 @@ SUSPECTS = [
     (re.compile(r"^\s*import .*\*\s*$"), "wildcard import"),
 ]
 
+# commonMain 里不能出现的 JVM/Android 专属引用。
+# androidx.* 是合法的 —— Compose Multiplatform 在 Android 上就是重定向到 androidx 制品。
+COMMON_MAIN_BANNED = re.compile(r"(?<![\w.])(?:java|android|System)(?:\.[A-Za-z_][\w]*){1,}")
+
+
+def scan_platform_leaks(text: str):
+    """Yield (line, message) for JVM-only references that would break the iOS build.
+
+    这个检查存在的原因：`System.currentTimeMillis()` 和 `java.util.Calendar` 都曾在
+    commonMain 里编译通过 —— Android 侧完全看不出问题，只有 CI 的 iOS 任务报
+    "Unresolved reference"，一轮来回十几分钟。注释里出现这些词是允许的，
+    所以复用同一个扫描器跳过字符串与注释。
+    """
+    in_block = False
+    for ln, line in enumerate(text.splitlines(), 1):
+        if in_block:
+            if "*/" in line:
+                in_block = False
+                line = line.split("*/", 1)[1]
+            else:
+                continue
+        elif "/*" in line and "*/" not in line:
+            in_block = True
+            line = line.split("/*", 1)[0]
+        code = line.split("//", 1)[0]
+        # 去掉字符串字面量，避免把文档示例里的引号内容当成代码
+        code = re.sub(r'"(?:[^"\\]|\\.)*"', '""', code)
+        m = COMMON_MAIN_BANNED.search(code)
+        if m:
+            yield ln, (
+                f"'{m.group(0)}' in commonMain is JVM-only and will not compile for iOS "
+                f"-- put it behind expect/actual"
+            )
+
 # A class header's parameter list is the one place where `val x = ...` at the start of a
 # line is legal (it declares a constructor property). Everything else that opens a paren
 # -- a call like `.then(` -- is expression position, where it is a syntax error.
@@ -125,6 +159,10 @@ def main() -> int:
         for ln, msg in scan(text):
             print(f"{rel(f)}:{ln}: {msg}")
             problems += 1
+        if "commonMain" in f.as_posix():
+            for ln, msg in scan_platform_leaks(text):
+                print(f"{rel(f)}:{ln}: {msg}")
+                problems += 1
         for rx, msg in SUSPECTS:
             for m in rx.finditer(text):
                 ln = text[: m.start()].count("\n") + 1

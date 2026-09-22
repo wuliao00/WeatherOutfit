@@ -1,5 +1,7 @@
 package com.jianyi.outfit.ui.scenery
 
+import com.jianyi.outfit.platform.currentMonth
+
 /**
  * 天气 → 风景的映射规则。
  *
@@ -7,7 +9,9 @@ package com.jianyi.outfit.ui.scenery
  * 最后用时段和月份做细化。规则从上到下短路，越靠前优先级越高，
  * 保证「下暴雨的中午」不会被判成「晴天的海岸」。
  *
- * 纯 Kotlin，不依赖 Compose，便于单元测试（见 SceneryResolverTest）。
+ * 规则本身不依赖 Compose，也不依赖平台时钟 —— month 是入参，
+ * 只有它的**默认值**走 expect/actual 拿当前月份（见 platform/PlatformTime.kt）。
+ * 单测一律显式传 month，所以结果与宿主时区无关。
  */
 data class SceneryPick(val scenery: Scenery, val reason: String)
 
@@ -25,7 +29,7 @@ object SceneryResolver {
         tempC: Double,
         hour: Int,
         windScale: Int = 2,
-        month: Int = java.util.Calendar.getInstance().get(java.util.Calendar.MONTH) + 1
+        month: Int = currentMonth()
     ): SceneryPick {
         val night = hour < 6 || hour >= 19
         val text = condition.trim()

@@ -9,3 +9,13 @@ package com.jianyi.outfit.platform
  * 这个坑是 CI 的 :shared iOS job 抓出来的，本机验证不到。
  */
 expect fun currentTimeMillis(): Long
+
+/**
+ * 当前月份，**一律返回 1~12**。
+ *
+ * 之所以单独开一个函数而不是让调用方自己 +1：Java 的 `Calendar.MONTH` 是 0 基的，
+ * 而 iOS 的 `NSCalendar` 拿到的月份本来就是 1 基。两边都写 `+1` 的话，
+ * Android 正确、iOS 变成 2~13，而「秋季换装感」这类规则会在 iOS 上悄悄选错风景，
+ * 不崩溃、不报错，只是偶尔不对。
+ */
+expect fun currentMonth(): Int

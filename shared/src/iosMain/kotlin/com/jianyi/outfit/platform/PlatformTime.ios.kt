@@ -1,5 +1,7 @@
 package com.jianyi.outfit.platform
 
+import platform.Foundation.NSCalendar
+import platform.Foundation.NSCalendarUnitMonth
 import platform.Foundation.NSDate
 import platform.Foundation.timeIntervalSince1970
 
@@ -8,3 +10,11 @@ import platform.Foundation.timeIntervalSince1970
  * 都是「距 1970-01-01 UTC 的毫秒数」，所以模板的 createdAt 跨端可比、可排序。
  */
 actual fun currentTimeMillis(): Long = (NSDate().timeIntervalSince1970 * 1000.0).toLong()
+
+/**
+ * NSCalendar 的月份**已经是 1~12**，所以这里不能再 +1。
+ * 与 Android 侧的差别写在 currentMonth 的 KDoc 里 —— 这是最容易写错成
+ * "两边都 +1" 的地方，而且错了也不崩，只是 iOS 上偶尔选错季节风景。
+ */
+actual fun currentMonth(): Int =
+    NSCalendar.currentCalendar.component(NSCalendarUnitMonth, NSDate()).toInt()
