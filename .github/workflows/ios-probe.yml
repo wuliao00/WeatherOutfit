@@ -1,0 +1,41 @@
+name: iOS probe
+
+# 与主 CI 完全分开：主 CI 跑在 ubuntu 上构建 Android，这里跑在 macOS 上只为回答
+# 「玻璃那套代码能不能为 iOS 编出来」。互不影响，探针挂了不会挡住发版。
+
+on:
+  push:
+    paths:
+      - "ios-probe/**"
+      - ".github/workflows/ios-probe.yml"
+  pull_request:
+    paths:
+      - "ios-probe/**"
+  workflow_dispatch:
+
+jobs:
+  compile-ios:
+    name: Compile glass layer for iOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.konan
+          key: kmp-${{ runner.os }}-${{ hashFiles('ios-probe/**/*.kts', 'ios-probe/gradle.properties') }}
+          restore-keys: kmp-${{ runner.os }}-
+
+      # 两个 target 都编：只编模拟器会漏掉真机 arm64 才暴露的问题，反之亦然
+      - name: Compile iosArm64 + iosSimulatorArm64
+        working-directory: ios-probe
+        run: ../gradlew compileKotlinIosArm64 compileKotlinIosSimulatorArm64 --no-daemon --stacktrace
