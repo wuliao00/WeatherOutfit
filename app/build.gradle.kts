@@ -89,6 +89,9 @@ ksp {
 }
 
 dependencies {
+    // 领域层（引擎 + 数据模型）。包名与 app 内一致，所以这一步不改任何 import。
+    implementation(project(":shared"))
+
     // AndroidX 基础
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

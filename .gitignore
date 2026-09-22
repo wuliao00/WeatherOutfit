@@ -5,6 +5,9 @@
 /.idea
 .DS_Store
 /build
+# 不能只写 /app/build/ —— 每加一个模块（shared 等）就会漏，
+# 结果上百个 .class/.dex/.jar 被当成源码提交。这条匹配任意层级的 build 目录。
+build/
 /app/build/
 /captures
 .externalNativeBuild

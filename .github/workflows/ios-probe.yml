@@ -8,13 +8,49 @@ on:
   push:
     paths:
       - "ios-probe/**"
+      # shared 是真正要长期保障的模块，它或根构建配置一变就要重编 iOS
+      - "shared/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle/libs.versions.toml"
       - ".github/workflows/ios-probe.yml"
   pull_request:
     paths:
       - "ios-probe/**"
+      - "shared/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle/libs.versions.toml"
   workflow_dispatch:
 
 jobs:
+  # 真正的领域层（shared）能不能为 iOS 编出来 —— 这才是迁移的实际保障。
+  # 探针只证明「玻璃那套代码理论上可编」，这个 job 证明「仓库里现在这份代码可编」，
+  # 所以任何人往 shared/commonMain 里加一个 Android-only 依赖，这里就会红。
+  shared-ios:
+    name: Compile :shared for iOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Cache Gradle + Kotlin/Native
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.konan
+          key: shared-ios-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml', 'shared/**', 'build.gradle.kts', 'settings.gradle.kts') }}
+          restore-keys: shared-ios-${{ runner.os }}-
+
+      - name: Compile shared for iosArm64 + iosSimulatorArm64
+        run: ./gradlew :shared:compileKotlinIosArm64 :shared:compileKotlinIosSimulatorArm64 --no-daemon --stacktrace
+
   version-matrix:
     name: kotlin ${{ matrix.kotlin }} / compose ${{ matrix.compose }}
     runs-on: macos-latest

@@ -122,7 +122,8 @@ enum class SceneryMode(val label: String) {
  * 靠「能看穿背景」成立的，卡片一旦改用静态着色就退化成一块灰色圆角板。
  * 早先在 Android 11 / 60Hz 的测试机上默认给的是 BALANCED，那台机器既没有
  * RenderEffect 也撑不住全屏多图层模糊；现在的支持面变了，默认值跟着变。
- * 系统低于 Android 12 时 [GlassHost] 会自行逐级降级，不会因为选了 REALTIME 而白屏。
+ * 系统低于 Android 12（没有 RenderEffect）时，玻璃层会自行逐级降级，
+ * 不会因为选了 REALTIME 而白屏 —— 降级逻辑在 app 的 ui/glass 里，不在这里。
  *
  * - REALTIME   ：卡片与顶栏都做实时模糊，最贴近液态玻璃（默认）
  * - BALANCED   ：仅顶栏/浮层实时模糊，卡片用静态着色
