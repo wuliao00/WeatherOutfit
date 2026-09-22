@@ -55,7 +55,7 @@
 
 **跟手。** 位移一律写进 `Animatable` 并只在 `graphicsLayer` 的 lambda 里读取，因此每帧只更新变换矩阵、不触发重组；弹簧取代固定时长 tween，使快速连点时动画从当前速度接续而非重播。刷新按钮的无限旋转动画只在真正加载时才挂进组合，平时一帧都不空转。
 
-**高帧率。** `View.requestedFrameRate = REQUESTED_FRAME_RATE_CATEGORY_HIGH` 申请的是「帧率类别」，该常量要 **Android 15（API 35）** 才有，低版本直接跳过（早先按 API 31 守卫会在 Android 12~14 上编译期就过不去）；配合 `android:preferMinimalPostProcessing` 压低合成延迟。注意这是**请求**而非保证：实际能到多少仍由设备可用刷新率决定（见「已知说明」）。
+**高帧率。** `View.setRequestedFrameRate(float)` 要 **Android 15（API 35）** 才有（SDK 的 `api-versions.xml` 记的就是 `since=35`，早先按 31 守卫会在 Android 12~14 抛 `NoSuchMethodError`），低版本直接跳过。关键一点：`REQUESTED_FRAME_RATE_CATEGORY_HIGH` 并不是独立的「类别 API」，它就是**同一个 float 参数上的负数哨兵**（-4.0f），所以「发类别」和「发精确值」互斥、不能两个都发。而类别值到了 framework 里要经厂商 overlay（`config_defaultHighFrameRateCategoryRate` 之类）翻译成一个具体 Hz——「高」到底是多少是 OEM 说了算，不少机型把高档定在 90。真机实测印证了这点：只发 `CATEGORY_HIGH` 时，120Hz 面板上滚动期间平均约 104fps、静止约 96fps，`dumpsys display` 一度直接报 `renderFrameRate 90.0`，明显没拿到顶档。因此改为读取**当前分辨率下面板支持的最高 Hz** 并按精确值申请（`FrameRate.peak`），读不到时才退回类别通道；关闭时发 `NO_PREFERENCE`。这仍然只是**请求**，省电模式与机身温度都能否决它，所以设置页把实际申请到的数字直接写出来，而不是只写「已开启」。配合 `android:preferMinimalPostProcessing` 压低合成延迟。
 
 三档性能策略可在设置里切换，默认「全实时」（Android 12 以下会自动逐级降级，设置页会如实说明）：
 

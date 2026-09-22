@@ -53,6 +53,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -84,6 +85,7 @@ import com.jianyi.outfit.ui.theme.LocalScenery
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
+import kotlin.math.roundToInt
 
 /** 可选的每日推送时刻（点整），与推送时间选择器一一对应 */
 private val PUSH_HOUR_OPTIONS = listOf(6, 7, 8, 9)
@@ -233,11 +235,7 @@ fun SettingsScreen(
                     title = "高帧率渲染",
                     // 申请通道要 Android 15+ 才有；旧系统上这个开关确实无效，
                     // 与其默默失效，不如直接说明，省得用户开了又疑惑为什么没变化
-                    subtitle = if (FrameRate.isSupported) {
-                        "向系统请求以屏幕最高刷新率绘制动画（更费电）"
-                    } else {
-                        "本机系统未提供帧率申请通道（需 Android 15+），此项暂不生效"
-                    },
+                    subtitle = frameRateSubtitle(state.prefs.highFrameRateEnabled),
                     checked = state.prefs.highFrameRateEnabled,
                     onCheckedChange = viewModel::setHighFrameRate,
                     dark = dark
@@ -482,6 +480,26 @@ private fun Segments(
 }
 
 
+
+/**
+ * 高帧率开关的说明文案：把「实际申请到了多少 Hz」直接写出来。
+ *
+ * 只写"已开启"不够 —— 帧率请求是可以被系统整个否决的，用户看到写着开启、
+ * 系统浮层却显示 90Hz 时无从判断是开关没生效、还是系统根本不给。
+ */
+@Composable
+private fun frameRateSubtitle(enabled: Boolean): String {
+    if (!FrameRate.isSupported) {
+        return "本机系统未提供帧率申请通道（需 Android 15+），此项暂不生效"
+    }
+    if (!enabled) return "已关闭：把刷新率选择权交回系统（更省电）"
+    val peak = FrameRate.peak(LocalView.current)
+    return if (peak > 0f) {
+        "已向系统申请 ${peak.roundToInt()}Hz 精确档；最终档位仍由系统裁决，省电模式与机身温度会把它压回去"
+    } else {
+        "已申请高帧率类别档（本机读不到面板档位，具体 Hz 交由系统翻译）"
+    }
+}
 
 /** 顶栏玻璃 */
 @Composable
