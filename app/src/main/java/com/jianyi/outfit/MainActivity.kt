@@ -47,7 +47,7 @@ class MainActivity : ComponentActivity() {
             val dark = isSystemInDarkTheme() || controller.scenery.dark
             val view = LocalView.current
             SideEffect {
-                FrameRate.request(view, prefs.highFrameRateEnabled)
+                FrameRate.request(window, view, prefs.highFrameRateEnabled)
                 WindowInsetsControllerCompat(window, view).apply {
                     isAppearanceLightStatusBars = !dark
                     isAppearanceLightNavigationBars = !dark

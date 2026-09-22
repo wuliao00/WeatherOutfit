@@ -481,25 +481,32 @@ private fun Segments(
 
 
 /**
- * 高帧率开关的说明文案：把「实际申请到了多少 Hz」直接写出来。
+ * 高帧率开关的说明文案：把「平台到底收下了哪条通道」直接写出来。
  *
  * 只写"已开启"不够 —— 帧率请求是可以被系统整个否决的，用户看到写着开启、
  * 系统浮层却显示 90Hz 时无从判断是开关没生效、还是系统根本不给。
+ * 数字一律取自 FrameRate 读回来的状态，不在这里重新算 peak()：
+ * 申请发生在 MainActivity 的 SideEffect 里，现算会把"以为会发的"当成"已经发的"。
  */
 @Composable
 private fun frameRateSubtitle(enabled: Boolean): String {
     if (!FrameRate.isSupported) {
-        return "本机系统未提供帧率申请通道（需 Android 15+），此项暂不生效"
+        return "本机系统未提供帧率申请通道（需 Android 12+），此项暂不生效"
     }
     if (!enabled) return "已关闭：把刷新率选择权交回系统（更省电）"
-    // 读 FrameRate 实际发出去的那个值，不在这里重新算 peak()：
-    // 申请发生在 MainActivity 的 SideEffect 里，现算会把"以为会发的"当成"已经发的"。
-    val sent = FrameRate.requestedHz
+    val exact = FrameRate.requestedHz.roundToInt()
+    val locked = FrameRate.lockedHz.roundToInt()
     return when {
-        sent > 0f ->
-            "已向系统申请 ${sent.roundToInt()}Hz 精确档；最终档位仍由系统裁决，省电模式与机身温度会把它压回去"
+        FrameRate.exactChannelAccepted && FrameRate.lockedModeId != 0 ->
+            "已锁档并向系统申请 ${exact}Hz（面板顶档）；最终档位仍由系统裁决，" +
+                "省电模式与机身温度会把它压回去"
+
+        FrameRate.lockedModeId != 0 ->
+            "已锁定 ${locked}Hz 面板档位；本机精确帧率通道未开放，锁档是唯一生效的那条"
+
         FrameRate.usedCategoryFallback ->
             "已申请高帧率类别档（本机读不到面板档位，具体 Hz 交由系统翻译）"
+
         else ->
             "已请求高帧率，等待系统裁决（这一帧还没读到面板档位）"
     }
