@@ -55,7 +55,7 @@
 
 **跟手。** 位移一律写进 `Animatable` 并只在 `graphicsLayer` 的 lambda 里读取，因此每帧只更新变换矩阵、不触发重组；弹簧取代固定时长 tween，使快速连点时动画从当前速度接续而非重播。刷新按钮的无限旋转动画只在真正加载时才挂进组合，平时一帧都不空转。
 
-**高帧率。** `View.setRequestedFrameRate(float)` 要 **Android 15（API 35）** 才有（SDK 的 `api-versions.xml` 记的就是 `since=35`，早先按 31 守卫会在 Android 12~14 抛 `NoSuchMethodError`），低版本直接跳过。关键一点：`REQUESTED_FRAME_RATE_CATEGORY_HIGH` 并不是独立的「类别 API」，它就是**同一个 float 参数上的负数哨兵**（-4.0f），所以「发类别」和「发精确值」互斥、不能两个都发。而类别值到了 framework 里要经厂商 overlay（`config_defaultHighFrameRateCategoryRate` 之类）翻译成一个具体 Hz——「高」到底是多少是 OEM 说了算，不少机型把高档定在 90。真机实测印证了这点：只发 `CATEGORY_HIGH` 时，120Hz 面板上滚动期间平均约 104fps、静止约 96fps，`dumpsys display` 一度直接报 `renderFrameRate 90.0`，明显没拿到顶档。因此改为读取**当前分辨率下面板支持的最高 Hz** 并按精确值申请（`FrameRate.peak`），读不到时才退回类别通道；关闭时发 `NO_PREFERENCE`。这仍然只是**请求**，省电模式与机身温度都能否决它，所以设置页把实际申请到的数字直接写出来，而不是只写「已开启」。配合 `android:preferMinimalPostProcessing` 压低合成延迟。
+**高帧率。** `View.setRequestedFrameRate(float)` 要 **Android 15（API 35）** 才有（SDK 的 `api-versions.xml` 记的就是 `since=35`，早先按 31 守卫会在 Android 12~14 抛 `NoSuchMethodError`），低版本直接跳过。关键一点：`REQUESTED_FRAME_RATE_CATEGORY_HIGH` 并不是独立的「类别 API」，它就是**同一个 float 参数上的负数哨兵**（-4.0f），所以「发类别」和「发精确值」互斥、不能两个都发；类别值进了 framework 还要经厂商 overlay（`config_defaultHighFrameRateCategoryRate` 之类）翻译成具体 Hz，「高」等于多少是 OEM 说了算。现在发的是**当前分辨率下面板支持的最高 Hz**（`FrameRate.peak`），读不到时才退回类别通道，关闭时发 `NO_PREFERENCE`。这仍然只是**请求**，所以设置页把实际申请到的数字直接写出来，而不是只写「已开启」。配合 `android:preferMinimalPostProcessing` 压低合成延迟。**但要注意：发精确值在 PLB110 上并没有把档位顶到 120**——见「已知说明」里的实测表，天花板另有其因。
 
 三档性能策略可在设置里切换，默认「全实时」（Android 12 以下会自动逐级降级，设置页会如实说明）：
 
@@ -188,7 +188,18 @@ app/src/main/java/com/jianyi/outfit/
 
 ## 已知说明
 
-- **高帧率是「请求」，不是「保证」。** 系统会按设备可用刷新率与功耗策略决定最终档位。当前测试机 OPPO PLB110（Android 15 / 面板 120Hz，`supportedModes` 含 120/90/60）实测：连续滚动 2.8s 出 292 帧（约 104 fps，含 adb 注入的间隔），`Janky frames 0.00%`、`Missed Vsync 0`；静止 6.2s 出 594 帧（约 96 fps，呼吸动画在持续驱动重绘，所以不会掉到 0），同样 0 jank。开启实时模糊后没有出现可测的掉帧。旧测试机 vivo V2156A 只有 60Hz 一档，当时「本机无法演示高刷」的结论已随换机失效。另外这类机器的 presentation deadline 偏紧（此机 11.3ms，旧机 9.4ms），`dumpsys gfxinfo` 的 janky% 会虚高——判断是否真的掉帧要看「单位时间产帧数」，不能只看百分比。
+- **本机跑不到 120Hz，而且是两重原因叠在一起。** 测试机 OPPO PLB110（Android 15 / 面板 120Hz，`peak_refresh_rate=120.0`，未开省电、温度正常），系统桌面与设置页的刷新率浮层显示 **120**，本 App 无论怎么申请都只有 **90**。release 包（R8 + 非 debug Compose）滚动期间实测：
+
+  | 玻璃档位 | 每帧 p50 | p90 | p99 | 系统给的 Hz |
+  |---|---|---|---|---|
+  | 全实时（默认） | 13ms | 15ms | 16ms | 90 |
+  | 均衡 | 9ms | 12ms | 14ms | 90 |
+  | 流畅优先 | 7ms | 8ms | 10ms | **仍然 90** |
+
+  120Hz 的每帧预算是 **8.33ms**，90Hz 是 11.1ms（deadline 14.1ms）。所以「全实时」那 13ms 本来就到不了 120 —— 系统定在 90 是算出来的正确结果，不是被谁拦了。而卡片实时模糊单项就值约 **4ms/帧**（13→9ms）。**但即使降到 7ms、已经在 8.33ms 预算内，系统依旧只给 90Hz**，说明还有一层与本 App 绑定的策略上限（桌面能拿 120，第三方被定在 90），这不是应用侧能改的。三档 `Janky frames` 都是 **0.00%**、`Missed Vsync` 0 —— 90Hz 下是跑满的，没有任何丢帧。
+- **debug 与 release 的帧耗时基本一致**（都是 p50 13ms），所以"上 release 就能高刷"这条路在这台机器上不成立，测帧率不必先等 release 构建。
+- **`dumpsys display` 的 `mActiveSfDisplayMode` / `renderFrameRate` 不能当实时档位用**：本机上它长期停在 90 的条目、`DisplayDeviceInfo` 里那段又是 120，读出来会自相矛盾。可信的两个探针是**开发者选项 → 显示刷新频率**的浮层数字，以及 `dumpsys SurfaceFlinger | grep renderRate`。
+- **`gfxinfo` 的 `Total frames rendered` 除以"我 sleep 了几秒"是错的**：adb 往返本身有几百毫秒开销，早期版本据此写出的"约 104fps"超过了面板实际能给的 90Hz，是个不可能成立的数字。要算窗口请用报告里的时间戳，或者直接看百分位与产帧密度。旧测试机 vivo V2156A 只有 60Hz 一档，当时「本机无法演示高刷」的结论已随换机失效。
 - **呼吸动画会让屏幕持续重绘。** 静止时仍以 90~120fps 出帧，是「背景不死板」这个观感需求的直接代价。设置页的「呼吸漂移」关掉即可回到真正的静止帧。
 - **风景素材由 AI 生成。** 8 张背景为本次改造生成，出处已在提交说明中记录；构图上裁掉了底部约 6% 以避开生成器加盖的「AI 生成」角标——这是重新取景，不是涂抹遮盖，来源属性在此如实说明。
 - **实时模糊只有一份源。** 卡片与顶栏都只采样风景层，因此正文滚到顶栏底下时，压住它的是随滚动加深的磨砂而非真实模糊。这是刻意的取舍：多一个源就多一倍每帧模糊面积，中低端机直接掉帧。
