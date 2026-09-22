@@ -2,6 +2,10 @@ package com.jianyi.outfit.util
 
 import android.os.Build
 import android.view.View
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 
 /**
  * 高帧率申请。
@@ -74,12 +78,19 @@ object FrameRate {
         )
     }
 
-    /** 本次真正发出去的请求值（设置页拿它解释开关状态） */
-    var requestedHz: Float = 0f
+    /**
+     * 本次**真正发出去**的精确请求值（Hz）；0 表示这轮没发精确值。
+     *
+     * 做成 Compose 可观察状态而不是普通 `var`：设置页的副标题要显示"实际申请到了多少"，
+     * 而 `request()` 是在 `MainActivity` 的 `SideEffect` 里调的 —— 普通字段改了不会触发重组，
+     * 那行说明会永远停在第一帧的值上。之前副标题是自己再调一次 `peak()` 现算，
+     * 于是界面上写的是"我以为会发的"，不是"实际发出去的"，两处一旦分叉就没人知道。
+     */
+    var requestedHz: Float by mutableFloatStateOf(0f)
         private set
 
     /** 本次是否走的是「类别」通道而不是精确值 */
-    var usedCategoryFallback: Boolean = false
+    var usedCategoryFallback: Boolean by mutableStateOf(false)
         private set
 
     fun request(view: View, high: Boolean) {

@@ -53,7 +53,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -493,11 +492,16 @@ private fun frameRateSubtitle(enabled: Boolean): String {
         return "本机系统未提供帧率申请通道（需 Android 15+），此项暂不生效"
     }
     if (!enabled) return "已关闭：把刷新率选择权交回系统（更省电）"
-    val peak = FrameRate.peak(LocalView.current)
-    return if (peak > 0f) {
-        "已向系统申请 ${peak.roundToInt()}Hz 精确档；最终档位仍由系统裁决，省电模式与机身温度会把它压回去"
-    } else {
-        "已申请高帧率类别档（本机读不到面板档位，具体 Hz 交由系统翻译）"
+    // 读 FrameRate 实际发出去的那个值，不在这里重新算 peak()：
+    // 申请发生在 MainActivity 的 SideEffect 里，现算会把"以为会发的"当成"已经发的"。
+    val sent = FrameRate.requestedHz
+    return when {
+        sent > 0f ->
+            "已向系统申请 ${sent.roundToInt()}Hz 精确档；最终档位仍由系统裁决，省电模式与机身温度会把它压回去"
+        FrameRate.usedCategoryFallback ->
+            "已申请高帧率类别档（本机读不到面板档位，具体 Hz 交由系统翻译）"
+        else ->
+            "已请求高帧率，等待系统裁决（这一帧还没读到面板档位）"
     }
 }
 
