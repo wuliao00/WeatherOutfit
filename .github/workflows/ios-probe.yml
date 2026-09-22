@@ -1,7 +1,8 @@
 name: iOS probe
 
 # 与主 CI 完全分开：主 CI 跑在 ubuntu 上构建 Android，这里跑在 macOS 上只为回答
-# 「玻璃那套代码能不能为 iOS 编出来」。互不影响，探针挂了不会挡住发版。
+# 「玻璃那套代码能不能为 iOS 编出来」以及「哪个版本组合可行」。
+# 探针挂了不会挡住发版。
 
 on:
   push:
@@ -14,9 +15,26 @@ on:
   workflow_dispatch:
 
 jobs:
-  compile-ios:
-    name: Compile glass layer for iOS
+  version-matrix:
+    name: kotlin ${{ matrix.kotlin }} / compose ${{ matrix.compose }}
     runs-on: macos-latest
+    # 矩阵里某一档失败是「信息」而不是「事故」：我们要的是完整的答案表，
+    # 所以不许 fail-fast，也不让单个失败把整条流水线变红。
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 最关键的一档：App 现在就是 Kotlin 2.1.0 + Compose 1.8.3。
+          # 这一档过了，KMP 迁移就不需要动 Android 的任何工具链。
+          - kotlin: "2.1.0"
+            compose: "1.8.2"
+          # 退一步：只小升 Kotlin，仍然不碰 Compose 代际
+          - kotlin: "2.2.20"
+            compose: "1.8.2"
+          # 已知能过的一档，用来确认「失败是版本问题，不是探针本身坏了」
+          - kotlin: "2.4.20"
+            compose: "1.12.0"
     steps:
       - uses: actions/checkout@v4
 
@@ -26,16 +44,19 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Cache Gradle
+      - name: Cache Gradle + Kotlin/Native
         uses: actions/cache@v4
         with:
           path: |
             ~/.gradle/caches
             ~/.konan
-          key: kmp-${{ runner.os }}-${{ hashFiles('ios-probe/**/*.kts', 'ios-probe/gradle.properties') }}
+          key: kmp-${{ runner.os }}-k${{ matrix.kotlin }}-c${{ matrix.compose }}
           restore-keys: kmp-${{ runner.os }}-
 
       # 两个 target 都编：只编模拟器会漏掉真机 arm64 才暴露的问题，反之亦然
       - name: Compile iosArm64 + iosSimulatorArm64
         working-directory: ios-probe
-        run: ../gradlew compileKotlinIosArm64 compileKotlinIosSimulatorArm64 --no-daemon --stacktrace
+        run: |
+          ../gradlew compileKotlinIosArm64 compileKotlinIosSimulatorArm64 \
+            --no-daemon --stacktrace \
+            -PkotlinVersion=${{ matrix.kotlin }} -PcomposeVersion=${{ matrix.compose }}

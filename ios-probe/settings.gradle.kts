@@ -16,9 +16,11 @@ dependencyResolutionManagement {
 /**
  * 独立的 Gradle 构建，故意不挂到仓库根 settings.gradle.kts 上。
  *
- * 原因：Compose Multiplatform 1.12 对应的是 Jetpack Compose 1.12，而线上 App 还在
- * Compose 1.8.3 / compileSdk 35。真做 KMP 迁移时整套工具链（Kotlin / AGP / compileSdk）
- * 都要一起升，那是有风险的改动；探针不能把这个风险带进 App 的构建里，
- * 所以这里用一套自己的版本，独立解析、独立编译。
+ * 版本从 gradle.properties 读，是为了让 CI 能用矩阵一次问出多个组合行不行
+ * （见 .github/workflows/ios-probe.yml）。最关键的一个问题是：
+ * **Compose Multiplatform 1.8.2 配 App 现在的 Kotlin 2.1.0 能不能编 iOS** ——
+ * 如果能，KMP 迁移就不需要动 Android 的任何工具链；如果不能，才要评估升 Kotlin。
+ * 这个问题在 Windows 本机问不了（Kotlin/Native 的 iOS target 要 macOS 宿主），
+ * 所以交给 CI 回答。
  */
 rootProject.name = "ios-probe"
