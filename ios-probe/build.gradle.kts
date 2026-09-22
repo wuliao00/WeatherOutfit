@@ -3,19 +3,16 @@
  * 能不能为 iOS 编出来，以及 Haze 的 iOS 产物有没有暴露我们在用的那几个 API
  * （HazeStyle / HazeTint / hazeSource / hazeEffect / HazeInputScale / HazeEffectScope.mask）。
  *
- * 只有 iOS target，没有 Android target —— 这样不需要 AGP、不需要 compileSdk，
+ * 只有 iOS target，没有 Android target —— 不需要 AGP、不需要 compileSdk，
  * 也就不会把「升工具链」的风险引进来。
  *
- * kotlin / compose 两个版本可由 CI 用 -P 覆盖，用来跑版本组合矩阵；
- * 本地不带参数时用最保守的那一档。
+ * 插件版本一律由 settings.gradle.kts 的 pluginManagement 提供，这里不写版本号：
+ * plugins {} 块看不见脚本顶部的 val，写了会直接编译失败。
  */
-val kotlinVersion: String = (properties["kotlinVersion"] as String?) ?: "2.1.0"
-val composeVersion: String = (properties["composeVersion"] as String?) ?: "1.8.2"
-
 plugins {
-    kotlin("multiplatform") version kotlinVersion
-    id("org.jetbrains.compose") version composeVersion
-    id("org.jetbrains.kotlin.plugin.compose") version kotlinVersion
+    id("org.jetbrains.kotlin.multiplatform")
+    id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.compose")
 }
 
 kotlin {
