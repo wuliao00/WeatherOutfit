@@ -1,5 +1,7 @@
 package com.jianyi.outfit.data.model
 
+import com.jianyi.outfit.platform.currentTimeMillis
+
 /**
  * 天气实况领域模型。
  * UI 层只依赖本文件中的领域模型，不直接接触网络 DTO，便于替换数据源。
@@ -220,7 +222,7 @@ data class CustomOutfitTemplate(
     val maxTemp: Int,           // 适配最高温（℃）
     val items: List<String>,    // 单品清单
     val tip: String,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = currentTimeMillis()
 ) {
     /** 适配温度范围展示文案 */
     val tempRangeText: String get() = "${minTemp}℃ ~ ${maxTemp}℃"
