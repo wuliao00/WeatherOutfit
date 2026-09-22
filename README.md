@@ -77,6 +77,47 @@
 - **定位**：FusedLocationProviderClient（Google Play Services）
 - **适配**：minSdk 26（Android 8.0）~ targetSdk 35（Android 15），手机/折叠屏/平板自适应布局
 
+## iOS / Kotlin Multiplatform 现状
+
+**目前只有 Android 版**，但 iOS 化的可行性已经用 CI 实测过，不是纸面推演。
+
+`ios-probe/` 是一个**独立的 Gradle 构建**（根构建不 include 它，对线上 App 零影响），
+把 `ui/glass/Glass.kt` 去 Android 化后交给 macOS runner 编 iOS，验证两件事：玻璃层能不能
+住进 `commonMain`，以及 Haze 的 iOS 产物有没有暴露我们在用的每个 API
+（`HazeStyle` / `HazeTint` / `hazeSource` / `hazeEffect` 的 scope lambda /
+`HazeInputScale` / `HazeEffectScope.mask`）。
+
+版本组合矩阵（`.github/workflows/ios-probe.yml`，三档全绿）：
+
+| Kotlin | Compose Multiplatform | 编 iOS |
+|---|---|---|
+| **2.1.0**（App 现在的版本） | **1.8.2** | ✅ |
+| 2.2.20 | 1.8.2 | ✅ |
+| 2.4.20 | 1.12.0 | ✅ |
+
+**最关键的一行是第一行**：App 现在的 Kotlin 2.1.0 配 CMP 1.8.2 就能编 iOS，
+所以做 KMP 迁移**不需要升 Android 的工具链**（Kotlin / AGP / compileSdk / Compose 代际都不用动）。
+
+依赖可用性核查（查的是各仓库自己的元数据，不是凭印象）：
+
+- ✅ Haze **1.6.10 就有 iosarm64**（core 与 materials 都有），玻璃层不用换库、不用升版本
+- ✅ Room 有 iOS 产物，自 2.7.0-alpha01 起（现 2.8.5）—— **只需升版本，不用换 SQLDelight**
+- ✅ DataStore / Coil3 / JB 的 lifecycle-viewmodel 与 navigation / Ktor / kotlinx-serialization 都有 iosarm64
+- ❌ **WorkManager 没有 iOS 对应物**，这是唯一真正要重新设计的功能
+
+每日推送在 iOS 上的替代方案（尚未实现）：iOS 的**预定本地通知本身就跨重启存活**，
+不需要任何 App 代码 —— Android 上靠 WorkManager + 开机广播去"恢复"的那件事，
+系统直接替你做了。做法是把未来 N 天排成 N 条 `UNCalendarNotificationTrigger`
+（每 App 上限 64 条，够用），`BGAppRefreshTask` 只负责后台刷新天气数据。
+一个诚实的降级：**极端天气预警**在 iOS 上做不到 Android 那种随时推送，那需要 APNs 与后端。
+
+迁移顺序（尚未开始）：`app` 改 KMP 模块（Android 行为必须零变化，由单测与 CI 守）
+→ 网络层换 Ktor + kotlinx.serialization → iOS 入口与平台实现 → 通知抽象与 iOS 本地通知。
+
+> 想在 macOS 上直接跑：`cd ios-probe && ../gradlew compileKotlinIosArm64`。
+> 不带参数即用最保守的 2.1.0 + 1.8.2；`-PkotlinVersion=` / `-PcomposeVersion=` 可覆盖。
+
+
 ## 快速开始
 
 1. 克隆仓库并用 Android Studio 打开，等待 Gradle 同步完成。
@@ -171,6 +212,10 @@ app/src/main/java/com/jianyi/outfit/
 ├── di/                  # 手动依赖容器 + ViewModel 工厂
 └── util/                # 工具类（格式化、定位、网络状态、帧率申请）
 ```
+
+仓库根的其它目录：`tools/` 是出图、取色、括号自查等辅助脚本；`ios-probe/` 是**独立的
+Gradle 构建**（根构建不 include 它），只为在 macOS 上验证玻璃层能否为 iOS 编出来，
+详见上面「iOS / Kotlin Multiplatform 现状」。
 
 ## 天气数据接口
 
