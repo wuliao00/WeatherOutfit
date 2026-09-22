@@ -8,6 +8,10 @@ coreKtx = "1.15.0"
 lifecycle = "2.8.7"
 activityCompose = "1.10.1"
 composeBom = "2025.06.01"
+# Compose Multiplatform：1.8.2 对应的正是 Jetpack Compose 1.8.x，与 app 现在的
+# composeBom 2025.06.01（= Compose 1.8.3）同代。CI 已实测 Kotlin 2.1.0 + CMP 1.8.2
+# 能编 iOS，所以这里不需要动 Kotlin / AGP / compileSdk。
+composeMp = "1.8.2"
 navigationCompose = "2.8.5"
 room = "2.6.1"
 retrofit = "2.11.0"
@@ -81,4 +85,5 @@ android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "composeMp" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }

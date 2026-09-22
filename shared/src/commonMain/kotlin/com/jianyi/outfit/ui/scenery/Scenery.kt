@@ -1,8 +1,8 @@
 package com.jianyi.outfit.ui.scenery
 
-import androidx.annotation.DrawableRes
 import androidx.compose.ui.graphics.Color
-import com.jianyi.outfit.R
+import com.jianyi.outfit.shared.res.*
+import org.jetbrains.compose.resources.DrawableResource
 
 /**
  * 内置风景主题：每一套都对应一种天气/时段气质。
@@ -10,10 +10,14 @@ import com.jianyi.outfit.R
  * sky / ground / accent 三个颜色是从对应图片上、中、下三段实测采样得到的
  * （见 tools/scenery_colors.py），不是手调的近似值——这样状态栏底色、
  * 玻璃描边色和背景不会出现「色差边」。
+ *
+ * resId 从 Android 的 @DrawableRes Int 换成了 CMP 的 DrawableResource：
+ * 图片也从 app/src/main/res/drawable-nodpi/ 搬到了
+ * shared/src/commonMain/composeResources/drawable/，两端共用同一份资源与同一份表。
  */
 enum class Scenery(
     val key: String,
-    @param:DrawableRes val resId: Int,
+    val resId: DrawableResource,
     val label: String,
     val poetic: String,
     val sky: Color,
@@ -24,7 +28,7 @@ enum class Scenery(
 ) {
     DAWN_RIDGE(
         key = "dawn_ridge",
-        resId = R.drawable.bg_dawn_ridge,
+        resId = Res.drawable.bg_dawn_ridge,
         label = "晨山云海",
         poetic = "天光初开，山脊浮在云上",
         sky = Color(0xFFD8DCD6),
@@ -34,7 +38,7 @@ enum class Scenery(
     ),
     ALPINE_LAKE(
         key = "alpine_lake",
-        resId = R.drawable.bg_alpine_lake,
+        resId = Res.drawable.bg_alpine_lake,
         label = "高山静湖",
         poetic = "水面如镜，山色倒映",
         sky = Color(0xFFBDCFC6),
@@ -44,7 +48,7 @@ enum class Scenery(
     ),
     FOREST_LIGHT(
         key = "forest_light",
-        resId = R.drawable.bg_forest_light,
+        resId = Res.drawable.bg_forest_light,
         label = "林间晨光",
         poetic = "光落在针叶林里",
         sky = Color(0xFF6B7268),
@@ -54,7 +58,7 @@ enum class Scenery(
     ),
     COAST_SUNSET(
         key = "coast_sunset",
-        resId = R.drawable.bg_coast_sunset,
+        resId = Res.drawable.bg_coast_sunset,
         label = "海岸暮色",
         poetic = "潮线退去，余温未散",
         sky = Color(0xFFD0B4AA),
@@ -64,7 +68,7 @@ enum class Scenery(
     ),
     RAIN_HILLS(
         key = "rain_hills",
-        resId = R.drawable.bg_rain_hills,
+        resId = Res.drawable.bg_rain_hills,
         label = "烟雨青峦",
         poetic = "雨雾在岭间流动",
         sky = Color(0xFF869BA4),
@@ -74,7 +78,7 @@ enum class Scenery(
     ),
     SNOW_PINE(
         key = "snow_pine",
-        resId = R.drawable.bg_snow_pine,
+        resId = Res.drawable.bg_snow_pine,
         label = "雪原松林",
         poetic = "落雪无声，天地一色",
         sky = Color(0xFFD9E1E0),
@@ -84,7 +88,7 @@ enum class Scenery(
     ),
     NIGHT_STARS(
         key = "night_stars",
-        resId = R.drawable.bg_night_stars,
+        resId = Res.drawable.bg_night_stars,
         label = "星野银河",
         poetic = "夜色沉在山脊背后",
         sky = Color(0xFF0F2234),
@@ -94,7 +98,7 @@ enum class Scenery(
     ),
     AUTUMN_VALLEY(
         key = "autumn_valley",
-        resId = R.drawable.bg_autumn_valley,
+        resId = Res.drawable.bg_autumn_valley,
         label = "秋谷层林",
         poetic = "层林染透，风里有凉意",
         sky = Color(0xFFB2A89A),

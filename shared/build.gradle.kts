@@ -17,6 +17,8 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.android.library)
+    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.compose.multiplatform)
 }
 
 kotlin {
@@ -39,8 +41,17 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            // 空。commonMain 必须保持零依赖，这是这个模块存在的理由：
-            // 一旦有人往这里加一个 Android-only 的库，iOS 就编不动了。
+            /**
+             * 这里一律用 api() 而不是 implementation()：DrawableResource 这类类型
+             * 出现在 shared 的公开签名里（Scenery.resId），app 要拿它去调
+             * painterResource(...)。用 implementation 会把依赖藏起来，
+             * app 那边就看不到 CMP 的 painterResource 重载。
+             */
+            api(compose.runtime)
+            api(compose.foundation)
+            api(compose.ui)
+            api(compose.material3)
+            api(compose.components.resources)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
@@ -61,4 +72,14 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+}
+
+/**
+ * CMP 资源：图片放 src/commonMain/composeResources/drawable/，
+ * 生成的 Res 类默认在 `<namespace>.generated.resources`。
+ * 这里显式钉住包名，避免以后改 namespace 时 app 侧的 import 集体失效。
+ */
+compose.resources {
+    publicResClass = true
+    packageOfResClass = "com.jianyi.outfit.shared.res"
 }
