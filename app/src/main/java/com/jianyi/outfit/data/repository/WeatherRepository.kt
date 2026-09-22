@@ -1,16 +1,15 @@
 package com.jianyi.outfit.data.repository
 
-import com.google.gson.Gson
-import com.google.gson.JsonParser
 import com.jianyi.outfit.BuildConfig
 import com.jianyi.outfit.data.local.dao.WeatherCacheDao
 import com.jianyi.outfit.data.local.entity.WeatherCacheEntity
 import com.jianyi.outfit.data.model.ForecastDay
 import com.jianyi.outfit.data.model.WeatherAlarm
 import com.jianyi.outfit.data.model.WeatherNow
+import com.jianyi.outfit.data.remote.DEFAULT_BASE_URL
 import com.jianyi.outfit.data.remote.LatLonWeatherResponse
-import com.jianyi.outfit.data.remote.RetrofitClient
-import com.jianyi.outfit.data.remote.WeatherApiService
+import com.jianyi.outfit.data.remote.WeatherApiClient
+import com.jianyi.outfit.data.remote.WeatherCacheCodec
 import com.jianyi.outfit.data.remote.WeatherEnvelope
 import com.jianyi.outfit.data.remote.WeatherResponse
 import com.jianyi.outfit.engine.OutfitRecommendationEngine
@@ -29,9 +28,6 @@ open class ApiException(message: String) : Exception(message)
 
 /** 限流错误（公共凭证共享频次被打爆时出现），retryAfterSec 为接口建议的等待秒数 */
 class RateLimitedException(message: String, val retryAfterSec: Int) : ApiException(message)
-
-/** 缓存包装：经纬度响应与其他端点结构不同，写入时带类型标记便于回读判别 */
-private data class CacheEnvelope(val type: String, val data: Any)
 
 /**
  * 天气数据仓库接口：统一「缓存 → 网络 → 过期缓存回退」策略，
@@ -61,13 +57,12 @@ interface WeatherRepository {
 /**
  * 天气数据仓库实现。
  * 凭证解析：用户在设置页自填的 id/key/apiUrl 优先，留空回退 BuildConfig 内置默认；
- * Retrofit 服务按 baseUrl 缓存复用（OkHttpClient 全局单例）。
+ * 客户端按 baseUrl 缓存复用（Ktor 的 HttpClient 内部持有连接池，一个地址一个实例）。
  */
 class WeatherRepositoryImpl(
     private val credentials: Flow<ApiCredentials>,
-    private val gson: Gson = Gson(),
     private val cacheDao: WeatherCacheDao,
-    private val apiFactory: (String) -> WeatherApiService = { RetrofitClient.create(it) }
+    private val apiFactory: (String) -> WeatherApiClient = { WeatherApiClient(it) }
 ) : WeatherRepository {
 
     companion object {
@@ -90,14 +85,14 @@ class WeatherRepositoryImpl(
         msg?.contains("频次") == true || msg?.contains("过快") == true
 
     /** Retrofit 服务按 baseUrl 复用（凭证变更仅影响请求参数，无需重建） */
-    private val apiCache = ConcurrentHashMap<String, WeatherApiService>()
+    private val apiCache = ConcurrentHashMap<String, WeatherApiClient>()
 
     /** 解析当前生效凭证（用户配置优先）并取对应服务 */
-    private suspend fun apiContext(): Pair<WeatherApiService, ApiCredentials> {
+    private suspend fun apiContext(): Pair<WeatherApiClient, ApiCredentials> {
         val resolved = credentials.first().resolve(
             defaultId = BuildConfig.WEATHER_API_ID,
             defaultKey = BuildConfig.WEATHER_API_KEY,
-            defaultUrl = RetrofitClient.DEFAULT_BASE_URL
+            defaultUrl = DEFAULT_BASE_URL
         )
         val api = apiCache.getOrPut(resolved.apiUrl) { apiFactory(resolved.apiUrl) }
         return api to resolved
@@ -172,7 +167,7 @@ class WeatherRepositoryImpl(
                 }
             } else {
                 // 成功后写入缓存并顺手清理过期项（经纬度响应带类型标记，回读时按标记选择 DTO）
-                val payload = if (tag != null) gson.toJson(CacheEnvelope(tag, response)) else gson.toJson(response)
+                val payload = WeatherCacheCodec.encode(response, tag)
                 cacheDao.put(
                     WeatherCacheEntity(cacheKey, payload, System.currentTimeMillis())
                 )
@@ -192,14 +187,11 @@ class WeatherRepositoryImpl(
         val cached = cacheDao.get(cacheKey) ?: return null
         val fresh = System.currentTimeMillis() - cached.cachedAt < CACHE_TTL_MS
         if (!fresh && !ignoreTtl) return null
-        return runCatching {
-            val root = JsonParser.parseString(cached.payloadJson).asJsonObject
-            if (root.has("type") && root.get("type").asString == "latlon") {
-                gson.fromJson(root.getAsJsonObject("data"), LatLonWeatherResponse::class.java)
-            } else {
-                gson.fromJson(cached.payloadJson, WeatherResponse::class.java)
-            }
-        }.getOrNull()?.takeIf { it.isSuccess }?.toWeather()
+        // 编解码（含「按 type 判别该用哪个 DTO」）在 shared 的 WeatherCacheCodec 里，
+        // 那边有单测钉住格式；这里只负责"解不开就当没有缓存"。
+        return WeatherCacheCodec.decode(cached.payloadJson)
+            ?.takeIf { it.isSuccess }
+            ?.toWeather()
     }
 
     /** 按响应实际类型转换为领域模型 */
@@ -280,10 +272,12 @@ private fun parseHour(timeText: String): Int {
  */
 fun LatLonWeatherResponse.toDomain(): WeatherNow {
     val condition = weather ?: "未知"
-    val cal = Calendar.getInstance().apply { timeInMillis = (dt ?: 0L) * 1000 }
-    val hour = if (dt != null) cal.get(Calendar.HOUR_OF_DAY) else Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-    val updateTimeText = if (dt != null) {
-        SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(dt * 1000))
+    // dt 声明在另一个模块，Kotlin 不做跨模块 smart cast，先落本地变量
+    val dtSec = dt
+    val cal = Calendar.getInstance().apply { timeInMillis = (dtSec ?: 0L) * 1000 }
+    val hour = if (dtSec != null) cal.get(Calendar.HOUR_OF_DAY) else Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+    val updateTimeText = if (dtSec != null) {
+        SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(dtSec * 1000))
     } else ""
     return WeatherNow(
         province = "",

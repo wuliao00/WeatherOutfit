@@ -28,16 +28,16 @@ class AppContainer(context: Context) {
     /** 天气缓存库（独立文件 weather_cache.db，备份规则按文件排除） */
     private val cacheDatabase: WeatherCacheDatabase = WeatherCacheDatabase.build(context)
 
-    /** JSON 序列化（缓存与模板清单存储共用） */
+    /** JSON 序列化（目前仅穿搭模板清单使用；天气侧已迁到 shared 的 kotlinx.serialization） */
     val gson: Gson = Gson()
 
     /** 设置仓库（Preferences DataStore）：需先于天气仓库创建，供其读取凭证 */
     val settingsRepository: SettingsRepository = SettingsRepositoryImpl(context.applicationContext)
 
-    /** 天气数据仓库：凭证取值「用户自填优先，否则 BuildConfig 默认」 */
+    /** 天气数据仓库：凭证取值「用户自填优先，否则 BuildConfig 默认」
+     *  不再需要 gson —— 序列化随网络层一起搬进了 shared（kotlinx.serialization） */
     val weatherRepository: WeatherRepository = WeatherRepositoryImpl(
         credentials = settingsRepository.apiCredentials,
-        gson = gson,
         cacheDao = cacheDatabase.weatherCacheDao()
     )
 

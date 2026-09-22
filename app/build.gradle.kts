@@ -130,10 +130,8 @@ dependencies {
     // 后台任务：每日穿搭推送（WorkManager 持久化调度）
     implementation(libs.androidx.work.runtime.ktx)
 
-    // 网络
-    implementation(libs.retrofit)
-    implementation(libs.retrofit.converter.gson)
-    implementation(libs.okhttp)
+    // JSON：仅穿搭模板清单一处在用（天气网络层已迁到 shared 的 kotlinx.serialization）
+    implementation(libs.gson)
 
     // 图片加载
     implementation(libs.coil.compose)

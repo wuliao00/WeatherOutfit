@@ -70,7 +70,7 @@
 - **语言**：Kotlin 2.1
 - **UI**：Jetpack Compose + Material Design 3 + Haze（背景模糊）
 - **架构**：MVVM（ViewModel + Repository + Data Source）
-- **网络**：Retrofit + OkHttp + Kotlin Coroutines
+- **网络**：Ktor + kotlinx.serialization（在 `shared` 模块，Android/iOS 共用；Coroutines）
 - **后台任务**：WorkManager（每日推送持久化调度，重启自动恢复）
 - **图片加载**：Coil（天气图标）
 - **本地存储**：Room（历史城市、穿搭模板、天气缓存）+ DataStore（轻量配置）
@@ -111,8 +111,9 @@
 （每 App 上限 64 条，够用），`BGAppRefreshTask` 只负责后台刷新天气数据。
 一个诚实的降级：**极端天气预警**在 iOS 上做不到 Android 那种随时推送，那需要 APNs 与后端。
 
-迁移顺序（尚未开始）：`app` 改 KMP 模块（Android 行为必须零变化，由单测与 CI 守）
-→ 网络层换 Ktor + kotlinx.serialization → iOS 入口与平台实现 → 通知抽象与 iOS 本地通知。
+迁移进度（进行中）：~~领域层抽出 shared（引擎 + 模型）~~ ✅ → ~~CI 编译 shared 的 iOS target~~ ✅
+→ ~~天气网络层换 Ktor + kotlinx.serialization（DTO 与缓存编解码进 commonMain，Gson↔kotlinx 等价性由对拍单测钉住；穿搭模板仍暂用 Gson）~~ ✅
+→ 剩余 UI 层进 commonMain（Glass / Motion / 各页面、Coil→Coil3）→ iOS 入口与平台实现 → 通知抽象与 iOS 本地通知。
 
 > 想在 macOS 上直接跑：`cd ios-probe && ../gradlew compileKotlinIosArm64`。
 > 不带参数即用最保守的 2.1.0 + 1.8.2；`-PkotlinVersion=` / `-PcomposeVersion=` 可覆盖。
@@ -191,7 +192,6 @@ val DarkPrimary = Color(0xFFA7BCDA)   // 暗黑模式主色（保持足够对比
 ```
 app/src/main/java/com/jianyi/outfit/
 ├── data/
-│   ├── remote/          # Retrofit 接口定义、API 响应模型、RetrofitClient
 │   ├── local/           # Room 数据库、DAO、Entity（城市/模板/缓存）
 │   ├── repository/      # 数据仓库层（天气/城市/设置/模板）
 │   └── model/           # 领域模型（天气、偏好、推荐结果、选景与玻璃档位）
@@ -207,10 +207,23 @@ app/src/main/java/com/jianyi/outfit/
 │   ├── theme/           # 颜色、字体、动效弹簧、主题装配
 │   ├── navigation/      # 导航图与转场
 │   └── components/      # 可复用 UI 组件
-├── engine/              # 穿搭推荐引擎、生活指数引擎（纯 Kotlin，可单测）
 ├── notification/        # 通知渠道、每日推送调度（WorkManager）与开机自启接收器
 ├── di/                  # 手动依赖容器 + ViewModel 工厂
 └── util/                # 工具类（格式化、定位、网络状态、帧率申请）
+```
+
+跨平台的 `shared/` 模块（Android 与 iOS 同源，包名与 app 一致所以 app 侧零 import 改动）：
+
+```
+shared/src/
+├── commonMain/kotlin/com/jianyi/outfit/
+│   ├── engine/          # 穿搭推荐引擎、生活指数引擎（纯 Kotlin，可单测）
+│   ├── data/model/      # 领域模型
+│   ├── data/remote/     # Ktor 客户端、@Serializable DTO、缓存编解码（格式兼容旧 Gson 行）
+│   ├── ui/scenery/      # 风景主题与天气→选景规则（图片用 CMP 资源）
+│   └── platform/        # expect/actual：时间与月份（JVM 泄漏已由本地 lint 守住）
+├── androidMain/ iosMain/  # 各平台 actual（HTTP 引擎：OkHttp / Darwin）
+└── commonTest/          # 缓存格式的"钉子"测试（历史 Gson 行必须一直能读）
 ```
 
 仓库根的其它目录：`tools/` 是出图、取色、括号自查等辅助脚本；`ios-probe/` 是**独立的

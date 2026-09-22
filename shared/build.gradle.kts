@@ -18,6 +18,7 @@ plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlinx.serialization)
     alias(libs.plugins.compose.multiplatform)
 }
 
@@ -52,6 +53,19 @@ kotlin {
             api(compose.ui)
             api(compose.material3)
             api(compose.components.resources)
+
+            // 网络层。这里一律 implementation()：DTO 是 shared 的公开类型，
+            // 但 Ktor 的 HttpClient 不出现在任何公开签名里，不该泄漏给 app。
+            implementation(libs.kotlinx.serialization.json)
+            implementation(libs.ktor.client.core)
+            implementation(libs.ktor.client.content.negotiation)
+            implementation(libs.ktor.client.serialization)
+        }
+        androidMain.dependencies {
+            implementation(libs.ktor.client.okhttp)
+        }
+        iosMain.dependencies {
+            implementation(libs.ktor.client.darwin)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))

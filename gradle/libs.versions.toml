@@ -14,9 +14,14 @@ composeBom = "2025.06.01"
 composeMp = "1.8.2"
 navigationCompose = "2.8.5"
 room = "2.6.1"
-retrofit = "2.11.0"
-okhttp = "4.12.0"
+# 网络层已迁到 Ktor + kotlinx.serialization（shared 模块，见下方 ktor 条目）。
+# Gson 只剩穿搭模板清单一处用途（OutfitTemplateRepository），后续单独迁走。
 gson = "2.10.1"
+# KMP 网络层：Ktor 3.0.3 是 Kotlin 2.1 时代发布的版本。
+# 刻意不追最新（3.6.0）—— 之前吃过一次「依赖制品的 Kotlin 元数据版本高于编译器」的硬错误，
+# 换库时宁可挑与当前 Kotlin 同代的那一档。
+ktor = "3.0.3"
+kotlinxSerialization = "1.7.3"
 coil = "2.7.0"
 datastore = "1.1.1"
 work = "2.9.1"
@@ -65,13 +70,19 @@ androidx-datastore-preferences = { group = "androidx.datastore", name = "datasto
 # 后台任务：每日推送（WorkManager 持久化，重启后自动恢复）
 androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "work" }
 
-# 网络：Retrofit + OkHttp + Gson
-retrofit = { group = "com.squareup.retrofit2", name = "retrofit", version.ref = "retrofit" }
-retrofit-converter-gson = { group = "com.squareup.retrofit2", name = "converter-gson", version.ref = "retrofit" }
-okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+# 网络层（shared 模块）：core + JSON 协商放 commonMain，引擎按平台放各自 source set
+kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
+ktor-client-core = { group = "io.ktor", name = "ktor-client-core", version.ref = "ktor" }
+ktor-client-content-negotiation = { group = "io.ktor", name = "ktor-client-content-negotiation", version.ref = "ktor" }
+ktor-client-serialization = { group = "io.ktor", name = "ktor-serialization-kotlinx-json", version.ref = "ktor" }
+ktor-client-okhttp = { group = "io.ktor", name = "ktor-client-okhttp", version.ref = "ktor" }
+ktor-client-darwin = { group = "io.ktor", name = "ktor-client-darwin", version.ref = "ktor" }
 
 # 图片加载
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
+
+# JSON（仅剩穿搭模板清单在用；天气侧用 kotlinx-serialization-json）
+gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
 
 # 定位（Google Play Services）
 play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
@@ -86,4 +97,5 @@ kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "composeMp" }
+kotlinx-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
