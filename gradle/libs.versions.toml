@@ -31,9 +31,6 @@ playServicesLocation = "21.3.0"
 junit = "4.13.2"
 # 液态玻璃：Compose 真实背景模糊（backdrop blur），Android 12+ 走 RenderEffect，低版本自动降级
 haze = "1.6.10"
-# JetBrains 多平台 savedstate：androidx 的 savedstate 没有 iOS 产物，JB 补了实现
-# （Android 变体仍委托 androidx；ViewModel 本体不需要它——androidx 2.8.7 自带 iOS）
-jbLifecycle = "2.8.4"
 # 启动屏：与风景背景衔接，消除冷启动白/黑闪
 splashscreen = "1.0.1"
 
@@ -43,10 +40,10 @@ androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = 
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
 androidx-lifecycle-viewmodel-compose = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "lifecycle" }
 androidx-lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycle" }
-# 多平台 ViewModel：androidx 2.8 起 lifecycle-viewmodel 本身带 iOS 产物（包名仍是 androidx.lifecycle），
-# shared 里的 ViewModel 直接用它；savedstate 的 iOS 产物只有 JB 包装器有
+# 多平台 ViewModel：androidx 2.8 起 lifecycle-viewmodel 本身带 iOS 产物
+# （包名仍是 androidx.lifecycle，viewModelScope 也在 commonMain 里），shared 直接用它。
+# savedstate 没有 iOS 产物，所以导航参数由 app 侧取出后以 String 传给 VM。
 androidx-lifecycle-viewmodel = { group = "androidx.lifecycle", name = "lifecycle-viewmodel", version.ref = "lifecycle" }
-jb-lifecycle-viewmodel-savedstate = { group = "org.jetbrains.androidx.lifecycle", name = "lifecycle-viewmodel-savedstate", version.ref = "jbLifecycle" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
 
 # Compose（使用 BOM 统一版本）

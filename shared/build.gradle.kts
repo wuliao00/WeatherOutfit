@@ -58,6 +58,14 @@ kotlin {
             // 液态玻璃。HazeState 出现在 GlassHost 的公开构造参数里，必须 api()
             api(libs.haze.core)
 
+            // 仓库接口的签名里有 Flow / suspend，coroutines 必须对 app 可见
+            api(libs.kotlinx.coroutines.core)
+
+            // 多平台 ViewModel：androidx 2.8 起 lifecycle-viewmodel 本身带 iOS 产物（包名不变）。
+            // ViewModel 出现在公开构造签名里，必须 api()。
+            // 导航参数由 app 侧工厂取出后以 String 传入，commonMain 不引入 SavedStateHandle
+            api(libs.androidx.lifecycle.viewmodel)
+
             // 网络层。这里一律 implementation()：DTO 是 shared 的公开类型，
             // 但 Ktor 的 HttpClient 不出现在任何公开签名里，不该泄漏给 app。
             implementation(libs.kotlinx.serialization.json)
