@@ -7,6 +7,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.jianyi.outfit.WeatherOutfitApp
 import com.jianyi.outfit.ui.city.CityViewModel
+import com.jianyi.outfit.ui.detail.DETAIL_ARG_CACHE_KEY
 import com.jianyi.outfit.ui.detail.OutfitDetailViewModel
 import com.jianyi.outfit.ui.home.HomeViewModel
 import com.jianyi.outfit.ui.settings.SettingsViewModel
@@ -19,7 +20,11 @@ object AppViewModelProvider {
 
     val Factory = viewModelFactory {
         initializer { HomeViewModel(app()) }
-        initializer { OutfitDetailViewModel(app().container, createSavedStateHandle()) }
+        initializer {
+            // 导航参数在 app 侧从 SavedStateHandle 取出后传给 shared 的 VM（VM 不感知导航实现）
+            val handle = createSavedStateHandle()
+            OutfitDetailViewModel(app().container, handle.get<String>(DETAIL_ARG_CACHE_KEY).orEmpty())
+        }
         initializer { CityViewModel(app()) }
         initializer { SettingsViewModel(app().container) }
     }

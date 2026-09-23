@@ -1,6 +1,5 @@
 package com.jianyi.outfit.ui.detail
 
-import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.jianyi.outfit.data.AppDependencies
@@ -32,10 +31,13 @@ data class OutfitDetailUiState(
  * - 通过导航参数（天气缓存 key）从仓库缓存读取首页刚加载的天气快照，
  *   生成三场景方案；无全局可变单例，不存在 null / 旧值竞态
  * - 管理用户自定义穿搭模板
+ *
+ * cacheKey 由 app 侧工厂从 SavedStateHandle 取出后传入 —— VM 本体不感知导航实现，
+ * 这样 commonMain 不需要引入 SavedStateHandle（其 iOS 产物只有 JB 包装器有，能少一个依赖就少一个）。
  */
 class OutfitDetailViewModel(
     private val deps: AppDependencies,
-    savedStateHandle: SavedStateHandle
+    cacheKey: String
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(OutfitDetailUiState())
@@ -43,7 +45,6 @@ class OutfitDetailViewModel(
 
     init {
         // 按导航参数的缓存 key 读取首页刚加载的天气（忽略 TTL，同一次会话内必然新鲜）
-        val cacheKey = savedStateHandle.get<String>(DETAIL_ARG_CACHE_KEY).orEmpty()
         if (cacheKey.isNotBlank()) {
             viewModelScope.launch {
                 deps.weatherRepository.cachedWeather(cacheKey)?.let { weather ->
