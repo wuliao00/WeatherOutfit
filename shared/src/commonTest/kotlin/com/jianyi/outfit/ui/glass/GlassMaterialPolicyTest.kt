@@ -1,14 +1,11 @@
-package com.jianyi.outfit
+package com.jianyi.outfit.ui.glass
 
 import com.jianyi.outfit.data.model.GlassQuality
 import com.jianyi.outfit.data.model.UserPreferences
-import com.jianyi.outfit.ui.glass.GlassEmphasis
-import com.jianyi.outfit.ui.glass.GlassRole
-import com.jianyi.outfit.ui.glass.realtimeBlurFor
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
-import org.junit.Test
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * 玻璃材质的「什么时候该糊、糊多透」策略测试。
@@ -17,6 +14,9 @@ import org.junit.Test
  * （本体 0.56 + 上缘高光 0.52 + 1px 描边 0.62），叠完接近不透明，屏幕上就是一排
  * 灰色圆角板。所以这里钉的不只是函数返回值，还有那条「实时模糊路径上绝不再叠白」的
  * 数值红线 —— 谁把 tintAlpha 调回 0.5 以上，这条测试就会红。
+ *
+ * 从 app 的 JVM 测试搬进 commonTest：realtimeBlurFor 是 shared 的 internal，
+ * 且这组真值表在 iOS 上同样生效。
  */
 class GlassMaterialPolicyTest {
 
@@ -26,8 +26,8 @@ class GlassMaterialPolicyTest {
     fun `performance tier never blurs anything even on capable hardware`() {
         for (role in GlassRole.entries) {
             assertFalse(
-                "$role should stay static on PERFORMANCE",
-                realtimeBlurFor(GlassQuality.PERFORMANCE, role, canBlur = true)
+                realtimeBlurFor(GlassQuality.PERFORMANCE, role, canBlur = true),
+                "$role should stay static on PERFORMANCE"
             )
         }
     }
@@ -42,8 +42,8 @@ class GlassMaterialPolicyTest {
     fun `realtime tier blurs both`() {
         for (role in GlassRole.entries) {
             assertTrue(
-                "$role should blur on REALTIME",
-                realtimeBlurFor(GlassQuality.REALTIME, role, canBlur = true)
+                realtimeBlurFor(GlassQuality.REALTIME, role, canBlur = true),
+                "$role should blur on REALTIME"
             )
         }
     }
@@ -54,8 +54,8 @@ class GlassMaterialPolicyTest {
         for (quality in GlassQuality.entries) {
             for (role in GlassRole.entries) {
                 assertFalse(
-                    "$quality/$role must not claim realtime without RenderEffect",
-                    realtimeBlurFor(quality, role, canBlur = false)
+                    realtimeBlurFor(quality, role, canBlur = false),
+                    "$quality/$role must not claim realtime without RenderEffect"
                 )
             }
         }
@@ -77,7 +77,7 @@ class GlassMaterialPolicyTest {
         val labels = GlassQuality.entries.map { it.label }
         assertEquals(labels.size, labels.distinct().size)
         GlassQuality.entries.forEach {
-            assertTrue("${it.name} needs a subtitle", it.desc.isNotBlank())
+            assertTrue(it.desc.isNotBlank(), "${it.name} needs a subtitle")
         }
     }
 
@@ -96,10 +96,10 @@ class GlassMaterialPolicyTest {
         for (i in 1 until ordered.size) {
             val lo = ordered[i - 1]
             val hi = ordered[i]
-            assertTrue("tint", lo.tintAlpha < hi.tintAlpha)
-            assertTrue("frost", lo.frostAlpha < hi.frostAlpha)
-            assertTrue("blur", lo.blur < hi.blur)
-            assertTrue("elevation", lo.elevation < hi.elevation)
+            assertTrue(lo.tintAlpha < hi.tintAlpha, "tint")
+            assertTrue(lo.frostAlpha < hi.frostAlpha, "frost")
+            assertTrue(lo.blur < hi.blur, "blur")
+            assertTrue(lo.elevation < hi.elevation, "elevation")
         }
     }
 
@@ -111,12 +111,12 @@ class GlassMaterialPolicyTest {
     fun `realtime tint stays far lighter than the static fallback`() {
         GlassEmphasis.entries.forEach {
             assertTrue(
-                "${it.name}: realtime tint must stay under the milk ceiling",
-                it.tintAlpha <= 0.30f
+                it.tintAlpha <= 0.30f,
+                "${it.name}: realtime tint must stay under the milk ceiling"
             )
             assertTrue(
-                "${it.name}: realtime tint must be clearly lighter than frost",
-                it.tintAlpha < it.frostAlpha * 0.5f
+                it.tintAlpha < it.frostAlpha * 0.5f,
+                "${it.name}: realtime tint must be clearly lighter than frost"
             )
         }
     }
@@ -125,8 +125,8 @@ class GlassMaterialPolicyTest {
     @Test
     fun `border stays a rim light rather than a sticker outline`() {
         GlassEmphasis.entries.forEach {
-            assertTrue("${it.name} border too strong", it.borderAlpha in 0.05f..0.25f)
-            assertTrue("${it.name} rim too strong", it.rimAlpha in 0.05f..0.35f)
+            assertTrue(it.borderAlpha in 0.05f..0.25f, "${it.name} border too strong")
+            assertTrue(it.rimAlpha in 0.05f..0.35f, "${it.name} rim too strong")
         }
     }
 }

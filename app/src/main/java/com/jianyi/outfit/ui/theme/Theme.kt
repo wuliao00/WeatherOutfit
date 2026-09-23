@@ -51,8 +51,7 @@ private val DarkColorScheme = darkColorScheme(
     outline = DarkOutline
 )
 
-/** 当前生效的风景，供任意组件取用强调色 / 判断明暗 */
-val LocalScenery = staticCompositionLocalOf { Scenery.DEFAULT }
+/** 当前生效的风景 LocalScenery 与 sceneryIsDark() 已随玻璃层迁入 shared（同包，无需 import） */
 
 @Composable
 fun WeatherOutfitTheme(
@@ -76,8 +75,3 @@ fun WeatherOutfitTheme(
         )
     }
 }
-
-/** 便捷读取：当前风景是否为暗调（组件据此决定玻璃底色与文字色） */
-@Composable
-fun sceneryIsDark(): Boolean = LocalScenery.current.dark ||
-    androidx.compose.foundation.isSystemInDarkTheme()

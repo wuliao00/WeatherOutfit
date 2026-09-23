@@ -51,8 +51,12 @@ kotlin {
             api(compose.runtime)
             api(compose.foundation)
             api(compose.ui)
+            api(compose.animation)
             api(compose.material3)
             api(compose.components.resources)
+
+            // 液态玻璃。HazeState 出现在 GlassHost 的公开构造参数里，必须 api()
+            api(libs.haze.core)
 
             // 网络层。这里一律 implementation()：DTO 是 shared 的公开类型，
             // 但 Ktor 的 HttpClient 不出现在任何公开签名里，不该泄漏给 app。

@@ -1,6 +1,5 @@
 package com.jianyi.outfit.ui.theme
 
-import android.provider.Settings
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -11,7 +10,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
-import androidx.compose.ui.platform.LocalContext
 
 /**
  * 动效规范：全部以「弹簧」为主，因为弹簧才有速度概念，
@@ -61,18 +59,14 @@ object MotionSpecs {
 val LocalReduceMotion = compositionLocalOf { false }
 
 @Composable
-fun rememberReduceMotion(): Boolean {
-    val context = LocalContext.current
-    return remember(context) {
-        runCatching {
-            Settings.Global.getFloat(
-                context.contentResolver,
-                Settings.Global.ANIMATOR_DURATION_SCALE,
-                1f
-            ) == 0f
-        }.getOrDefault(false)
-    }
-}
+fun rememberReduceMotion(): Boolean = systemAnimatorScaleDisabled()
+
+/**
+ * 平台点：系统动画时长缩放是否为 0。
+ * Android 读 Settings.Global.ANIMATOR_DURATION_SCALE；iOS 无此概念，恒为 false。
+ */
+@Composable
+internal expect fun systemAnimatorScaleDisabled(): Boolean
 
 /** 动画时长缩放到 0 时，用 Instant 语义：直接跳到目标值 */
 fun Animatable<Float, *>.isSettledAt(target: Float) = value == target

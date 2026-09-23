@@ -1,6 +1,5 @@
 package com.jianyi.outfit.ui.glass
 
-import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -131,8 +130,8 @@ enum class GlassEmphasis(
     THICK(52.dp, 0.68f, 0.26f, 0.33f, 0.23f, 11.dp)
 }
 
-/** 实时模糊的硬件门槛：Android 12 才有 RenderEffect */
-internal val supportsRealtimeBlur: Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+/** 实时模糊的硬件门槛（expect/actual）：Android 12+ 才有 RenderEffect；iOS 恒为 true */
+expect val supportsRealtimeBlur: Boolean
 
 /**
  * 档位 x 角色 x 硬件能力 -> 该不该走实时模糊。
