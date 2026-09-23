@@ -114,7 +114,8 @@
 迁移进度（进行中）：~~领域层抽出 shared（引擎 + 模型）~~ ✅ → ~~CI 编译 shared 的 iOS target~~ ✅
 → ~~天气网络层换 Ktor + kotlinx.serialization（DTO 与缓存编解码进 commonMain，Gson↔kotlinx 等价性由对拍单测钉住）~~ ✅
 → ~~穿搭模板清单迁离 Gson（至此主代码零 Gson；Gson 仅留作对拍测试参照）~~ ✅
-→ 剩余 UI 层进 commonMain（Glass / Motion / 各页面、Coil→Coil3）→ iOS 入口与平台实现 → 通知抽象与 iOS 本地通知。
+→ ~~液态玻璃 + 跟手动效整层进 commonMain（supportsRealtimeBlur / 系统动画缩放 expect/actual 化，材质策略测试随迁 commonTest）~~ ✅
+→ 剩余页面进 commonMain（各 Screen、导航、Coil→Coil3；Screen 依赖的 ViewModel/DataStore 抽象是前置）→ iOS 入口与平台实现 → 通知抽象与 iOS 本地通知。
 
 > 想在 macOS 上直接跑：`cd ios-probe && ../gradlew compileKotlinIosArm64`。
 > 不带参数即用最保守的 2.1.0 + 1.8.2；`-PkotlinVersion=` / `-PcomposeVersion=` 可覆盖。
