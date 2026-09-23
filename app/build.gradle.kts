@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlinx.serialization)
     alias(libs.plugins.ksp)
 }
 
@@ -130,17 +131,19 @@ dependencies {
     // 后台任务：每日穿搭推送（WorkManager 持久化调度）
     implementation(libs.androidx.work.runtime.ktx)
 
-    // JSON：仅穿搭模板清单一处在用（天气网络层已迁到 shared 的 kotlinx.serialization）
-    implementation(libs.gson)
+    // JSON：模板清单序列化（天气网络层在 shared 模块用同一套 kotlinx.serialization）
+    implementation(libs.kotlinx.serialization.json)
+
+    // 测试
+    testImplementation(libs.junit)
+    // 对拍测试的参照实现：证明 kotlinx.serialization 与旧版 Gson 行为一致（主代码已无 Gson）
+    testImplementation(libs.gson)
 
     // 图片加载
     implementation(libs.coil.compose)
 
     // 定位
     implementation(libs.play.services.location)
-
-    // 测试
-    testImplementation(libs.junit)
 
     debugImplementation(libs.androidx.ui.tooling)
 }

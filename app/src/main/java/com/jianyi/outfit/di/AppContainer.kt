@@ -1,7 +1,6 @@
 package com.jianyi.outfit.di
 
 import android.content.Context
-import com.google.gson.Gson
 import com.jianyi.outfit.data.local.AppDatabase
 import com.jianyi.outfit.data.local.WeatherCacheDatabase
 import com.jianyi.outfit.data.repository.CityRepository
@@ -28,9 +27,6 @@ class AppContainer(context: Context) {
     /** 天气缓存库（独立文件 weather_cache.db，备份规则按文件排除） */
     private val cacheDatabase: WeatherCacheDatabase = WeatherCacheDatabase.build(context)
 
-    /** JSON 序列化（目前仅穿搭模板清单使用；天气侧已迁到 shared 的 kotlinx.serialization） */
-    val gson: Gson = Gson()
-
     /** 设置仓库（Preferences DataStore）：需先于天气仓库创建，供其读取凭证 */
     val settingsRepository: SettingsRepository = SettingsRepositoryImpl(context.applicationContext)
 
@@ -46,7 +42,7 @@ class AppContainer(context: Context) {
 
     /** 穿搭模板仓库 */
     val templateRepository: OutfitTemplateRepository =
-        OutfitTemplateRepositoryImpl(database.outfitTemplateDao(), gson)
+        OutfitTemplateRepositoryImpl(database.outfitTemplateDao())
 
     /** 定位工具 */
     val locationUtil: LocationUtil = LocationUtil(context.applicationContext)

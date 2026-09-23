@@ -1,13 +1,13 @@
 package com.jianyi.outfit.data.repository
 
-import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
 import com.jianyi.outfit.data.local.dao.OutfitTemplateDao
 import com.jianyi.outfit.data.local.entity.OutfitTemplateEntity
 import com.jianyi.outfit.data.model.CustomOutfitTemplate
 import com.jianyi.outfit.data.model.OutfitPlan
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 /**
  * 穿搭模板仓库接口：保存/删除用户自定义穿搭方案与收藏的推荐方案，
@@ -29,11 +29,21 @@ interface OutfitTemplateRepository {
 
 /**
  * 穿搭模板仓库实现。
+ *
+ * itemsJson 是**用户数据**（自定义模板的单品清单），落盘格式是 JSON 字符串数组。
+ * 这里从 Gson 换成 kotlinx.serialization 时，两种格式的写法逐字节一致
+ * （纯字符串数组没有任何 Gson 特有语法），对拍单测钉住双向兼容：
+ * 旧版本写进库的行必须能读，新写出的行旧版本也必须能读。
  */
 class OutfitTemplateRepositoryImpl(
-    private val dao: OutfitTemplateDao,
-    private val gson: Gson = Gson()
+    private val dao: OutfitTemplateDao
 ) : OutfitTemplateRepository {
+
+    /** 与天气侧的 weatherJson 同款宽松配置；解析失败按"无单品"处理，绝不抛 */
+    private val templateJson = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+    }
 
     /** 观察全部模板（按创建时间倒序） */
     override val templates: Flow<List<CustomOutfitTemplate>> = dao.observeAll().map { list ->
@@ -63,7 +73,7 @@ class OutfitTemplateRepositoryImpl(
 
     private fun OutfitTemplateEntity.toModel(): CustomOutfitTemplate {
         val items = runCatching {
-            gson.fromJson<List<String>>(itemsJson, object : TypeToken<List<String>>() {}.type)
+            templateJson.decodeFromString<List<String>>(itemsJson)
         }.getOrNull() ?: emptyList()
         return CustomOutfitTemplate(
             id = id,
@@ -84,7 +94,7 @@ class OutfitTemplateRepositoryImpl(
             scene = scene,
             minTemp = minTemp,
             maxTemp = maxTemp,
-            itemsJson = gson.toJson(items),
+            itemsJson = templateJson.encodeToString(items),
             tip = tip,
             createdAt = createdAt
         )

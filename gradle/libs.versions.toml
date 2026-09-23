@@ -14,8 +14,8 @@ composeBom = "2025.06.01"
 composeMp = "1.8.2"
 navigationCompose = "2.8.5"
 room = "2.6.1"
-# 网络层已迁到 Ktor + kotlinx.serialization（shared 模块，见下方 ktor 条目）。
-# Gson 只剩穿搭模板清单一处用途（OutfitTemplateRepository），后续单独迁走。
+# Gson 已从主代码彻底移除；仅测试还在用 —— 对拍测试拿它当"参照实现"，
+# 钉住 kotlinx.serialization 与旧版解析行为逐字段一致、落盘格式双向兼容
 gson = "2.10.1"
 # KMP 网络层：Ktor 3.0.3 是 Kotlin 2.1 时代发布的版本。
 # 刻意不追最新（3.6.0）—— 之前吃过一次「依赖制品的 Kotlin 元数据版本高于编译器」的硬错误，
@@ -81,7 +81,7 @@ ktor-client-darwin = { group = "io.ktor", name = "ktor-client-darwin", version.r
 # 图片加载
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 
-# JSON（仅剩穿搭模板清单在用；天气侧用 kotlinx-serialization-json）
+# JSON：仅测试用（对拍参照实现），主代码一律 kotlinx-serialization-json
 gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
 
 # 定位（Google Play Services）
