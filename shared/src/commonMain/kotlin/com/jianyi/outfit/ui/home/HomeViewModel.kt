@@ -2,24 +2,24 @@ package com.jianyi.outfit.ui.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.jianyi.outfit.WeatherOutfitApp
+import com.jianyi.outfit.data.AppDependencies
 import com.jianyi.outfit.data.model.ForecastDay
 import com.jianyi.outfit.data.model.LifeIndex
 import com.jianyi.outfit.data.model.OutfitRecommendation
 import com.jianyi.outfit.data.model.UserPreferences
 import com.jianyi.outfit.data.model.WeatherNow
+import com.jianyi.outfit.data.repository.RateLimitedException
 import com.jianyi.outfit.engine.LifeIndexEngine
 import com.jianyi.outfit.engine.OutfitRecommendationEngine
-import com.jianyi.outfit.notification.Notifier
-import com.jianyi.outfit.util.LocationUtil
-import com.jianyi.outfit.data.repository.RateLimitedException
+import com.jianyi.outfit.platform.currentTimeMillis
+import com.jianyi.outfit.platform.currentHourOfDay
+import com.jianyi.outfit.platform.formatGeoKey
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.util.Locale
 import kotlin.math.roundToInt
 
 /** 定位来源：首页城市名旁的标识与 IP 降级提示依据 */
@@ -55,10 +55,12 @@ data class HomeUiState(
  *   并在 UI 上以来源标识 + 提示条告知用户可一键切换精确定位
  * - 当前城市变化 → 重新加载
  * - 偏好变化 → 用本地天气重算推荐（不发网络请求）
+ *
+ * 平台能力全部走 [AppDependencies] 抽象（定位、通知、推送调度），
+ * 时间与时区走 platform 的 expect/actual，缓存 key 走 [formatGeoKey] ——
+ * 因此这个文件对 Android 与 iOS 是同一份逻辑。
  */
-class HomeViewModel(private val app: WeatherOutfitApp) : ViewModel() {
-
-    private val container = app.container
+class HomeViewModel(private val deps: AppDependencies) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
@@ -87,9 +89,10 @@ class HomeViewModel(private val app: WeatherOutfitApp) : ViewModel() {
 
     /** 手动刷新节流检查：间隔不足时 Snackbar 提示剩余等待秒数 */
     private fun throttleCheck(): Boolean {
-        val elapsed = System.currentTimeMillis() - lastRequestAt
+        val now = currentTimeMillis()
+        val elapsed = now - lastRequestAt
         if (elapsed >= MIN_REQUEST_INTERVAL_MS) {
-            lastRequestAt = System.currentTimeMillis()
+            lastRequestAt = now
             return true
         }
         val wait = ((MIN_REQUEST_INTERVAL_MS - elapsed) / 1000).toInt() + 1
@@ -99,7 +102,7 @@ class HomeViewModel(private val app: WeatherOutfitApp) : ViewModel() {
 
     init {
         viewModelScope.launch {
-            container.cityRepository.currentCity.collect { city ->
+            deps.currentCity.collect { city ->
                 if (city == null) {
                     // 去重：仅首次 null 触发定位链，后续 null 发射（其他行变更）不再重复请求
                     if (!autoResolved) {
@@ -111,14 +114,14 @@ class HomeViewModel(private val app: WeatherOutfitApp) : ViewModel() {
                     val key = "addr|${city.province}|${city.city}"
                     if (key != loadedKey) {
                         load(key, LocationSource.MANUAL) {
-                            container.weatherRepository.byAddress(city.province, city.city)
+                            deps.weatherRepository.byAddress(city.province, city.city)
                         }
                     }
                 }
             }
         }
         viewModelScope.launch {
-            container.settingsRepository.preferences.collect { prefs ->
+            deps.settingsRepository.preferences.collect { prefs ->
                 _uiState.update { state ->
                     val weather = state.weather
                     state.copy(
@@ -138,16 +141,16 @@ class HomeViewModel(private val app: WeatherOutfitApp) : ViewModel() {
      * GPS 仅在权限已授予时静默尝试，未授权不弹窗打扰，直接走 IP。
      */
     private suspend fun resolveAutoLocation(force: Boolean) {
-        if (LocationUtil.hasLocationPermission(app)) {
-            val location = container.locationUtil.lastKnownLocation()
+        if (deps.locationProvider.hasPermission()) {
+            val location = deps.locationProvider.lastKnown()
             if (location != null) {
-                load(gpsKey(location.latitude, location.longitude), LocationSource.GPS) {
-                    container.weatherRepository.byLatLon(location.latitude, location.longitude, force)
+                load(formatGeoKey(location.latitude, location.longitude), LocationSource.GPS) {
+                    deps.weatherRepository.byLatLon(location.latitude, location.longitude, force)
                 }
                 return
             }
         }
-        load(IP_KEY, LocationSource.IP) { container.weatherRepository.byIp(force = force) }
+        load(IP_KEY, LocationSource.IP) { deps.weatherRepository.byIp(force = force) }
     }
 
     /** 下拉/点击刷新：10 秒节流后跳过缓存强制走网络 */
@@ -166,13 +169,13 @@ class HomeViewModel(private val app: WeatherOutfitApp) : ViewModel() {
 
     /** 强制走网络重新加载（手动刷新 / 限流自动重试共用） */
     private fun forceReload() {
-        lastRequestAt = System.currentTimeMillis()
+        lastRequestAt = currentTimeMillis()
         viewModelScope.launch {
             _uiState.update { it.copy(isRefreshing = true, error = null, rateLimitRetryIn = null) }
-            val city = container.cityRepository.currentCity.first()
+            val city = deps.currentCity.first()
             if (city != null) {
                 load("addr|${city.province}|${city.city}", LocationSource.MANUAL) {
-                    container.weatherRepository.byAddress(city.province, city.city, force = true)
+                    deps.weatherRepository.byAddress(city.province, city.city, force = true)
                 }
             } else {
                 resolveAutoLocation(force = true)
@@ -185,14 +188,14 @@ class HomeViewModel(private val app: WeatherOutfitApp) : ViewModel() {
         if (_uiState.value.isRefreshing) return
         if (!throttleCheck()) return
         viewModelScope.launch {
-            val location = container.locationUtil.lastKnownLocation()
+            val location = deps.locationProvider.lastKnown()
             if (location == null) {
                 _uiState.update {
                     it.copy(message = "定位失败，请确认系统定位已开启，或点击城市名手动搜索")
                 }
             } else {
-                load(gpsKey(location.latitude, location.longitude), LocationSource.GPS) {
-                    container.weatherRepository.byLatLon(location.latitude, location.longitude, force = true)
+                load(formatGeoKey(location.latitude, location.longitude), LocationSource.GPS) {
+                    deps.weatherRepository.byLatLon(location.latitude, location.longitude, force = true)
                 }
             }
         }
@@ -211,7 +214,7 @@ class HomeViewModel(private val app: WeatherOutfitApp) : ViewModel() {
         val weather = state.weather ?: return
         val plan = state.recommendation?.plans?.firstOrNull() ?: return
         viewModelScope.launch {
-            container.templateRepository.saveFromPlan(
+            deps.templateRepository.saveFromPlan(
                 plan = plan,
                 minTemp = (weather.dayLow ?: (weather.temperature - 3)).roundToInt(),
                 maxTemp = (weather.dayHigh ?: (weather.temperature + 3)).roundToInt()
@@ -293,16 +296,12 @@ class HomeViewModel(private val app: WeatherOutfitApp) : ViewModel() {
         )
     }
 
-    /** GPS 数据源 key：与仓库缓存 key 同构（loc|纬度|经度，两位小数防微动重复加载），详情页可直接读缓存 */
-    private fun gpsKey(lat: Double, lon: Double): String =
-        String.format(Locale.US, "loc|%.2f|%.2f", lat, lon)
-
     /** 把实况交给风景控制器，由它决定是否需要换景 */
     private fun notifyScenery(weather: WeatherNow) {
-        container.sceneryController.onWeather(
+        deps.sceneryController.onWeather(
             condition = weather.condition,
             tempC = weather.feelsLike ?: weather.temperature,
-            hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY),
+            hour = currentHourOfDay(),
             windScale = OutfitRecommendationEngine.parseWindScale(
                 weather.windScaleText, weather.windSpeedMs
             )
@@ -326,7 +325,7 @@ class HomeViewModel(private val app: WeatherOutfitApp) : ViewModel() {
             return
         }
         viewModelScope.launch {
-            container.weatherRepository.forecast(weather.province, weather.city).fold(
+            deps.weatherRepository.forecast(weather.province, weather.city).fold(
                 onSuccess = { days ->
                     _uiState.update {
                         it.copy(
@@ -364,11 +363,10 @@ class HomeViewModel(private val app: WeatherOutfitApp) : ViewModel() {
 
     /** 极端天气预警开关开启时，收到预警立即通知 */
     private suspend fun notifyExtremeWeatherIfNeeded(weather: WeatherNow) {
-        val prefs = container.settingsRepository.preferences.first()
+        val prefs = deps.settingsRepository.preferences.first()
         val alarm = weather.alarms.firstOrNull() ?: return
         if (prefs.extremeAlertEnabled) {
-            Notifier.showExtremeAlert(
-                app,
+            deps.extremeAlerter.show(
                 title = alarm.title,
                 text = "生效时间：${alarm.effective.ifBlank { "见官方信息" }}"
             )

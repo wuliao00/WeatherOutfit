@@ -19,7 +19,7 @@ import com.jianyi.outfit.ui.settings.SettingsViewModel
 object AppViewModelProvider {
 
     val Factory = viewModelFactory {
-        initializer { HomeViewModel(app()) }
+        initializer { HomeViewModel(app().container) }
         initializer {
             // 导航参数在 app 侧从 SavedStateHandle 取出后传给 shared 的 VM（VM 不感知导航实现）
             val handle = createSavedStateHandle()

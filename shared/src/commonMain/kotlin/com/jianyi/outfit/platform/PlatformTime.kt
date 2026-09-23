@@ -19,3 +19,15 @@ expect fun currentTimeMillis(): Long
  * 不崩溃、不报错，只是偶尔不对。
  */
 expect fun currentMonth(): Int
+
+/**
+ * 当前小时（0~23），本地时区。
+ * 紫外线指数按时刻估算要用；两端都是墙钟本地时间，语义一致。
+ */
+expect fun currentHourOfDay(): Int
+
+/**
+ * 当年第几天（1~366），本地时区。
+ * 「每日轮换」选景用它做取模，两端语义一致。
+ */
+expect fun currentDayOfYear(): Int

@@ -2,6 +2,10 @@ package com.jianyi.outfit.di
 
 import android.content.Context
 import com.jianyi.outfit.data.AppDependencies
+import com.jianyi.outfit.data.CitySelection
+import com.jianyi.outfit.data.ExtremeAlerter
+import com.jianyi.outfit.data.GeoPoint
+import com.jianyi.outfit.data.LocationProvider
 import com.jianyi.outfit.data.PushScheduler
 import com.jianyi.outfit.data.local.AppDatabase
 import com.jianyi.outfit.data.local.WeatherCacheDatabase
@@ -14,8 +18,11 @@ import com.jianyi.outfit.data.repository.SettingsRepositoryImpl
 import com.jianyi.outfit.data.repository.WeatherRepository
 import com.jianyi.outfit.data.repository.WeatherRepositoryImpl
 import com.jianyi.outfit.notification.DailyPushScheduler
+import com.jianyi.outfit.notification.Notifier
 import com.jianyi.outfit.util.LocationUtil
 import com.jianyi.outfit.ui.scenery.SceneryController
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 
 /**
  * 手动依赖容器（项目体量小，不引入 Hilt 等框架）。
@@ -63,12 +70,42 @@ class AppContainer(context: Context) : AppDependencies {
     val locationUtil: LocationUtil = LocationUtil(context.applicationContext)
 
     /**
+     * 定位能力（shared 的 ViewModel 只认这个接口，不认识 android.location.Location）。
+     * 声明在 locationUtil 之后：属性初始化按书写顺序执行，提前引用会拿到未初始化的值。
+     */
+    override val locationProvider: LocationProvider = object : LocationProvider {
+        override fun hasPermission(): Boolean =
+            LocationUtil.hasLocationPermission(context.applicationContext)
+
+        override suspend fun lastKnown(): GeoPoint? =
+            locationUtil.lastKnownLocation()?.let { GeoPoint(it.latitude, it.longitude) }
+    }
+
+    /** 极端天气预警通知：包装 NotificationCompat 的静态工具 */
+    override val extremeAlerter: ExtremeAlerter = object : ExtremeAlerter {
+        override fun show(title: String, text: String) =
+            Notifier.showExtremeAlert(context.applicationContext, title, text)
+    }
+
+    /**
      * 风景背景控制器（全应用单例）。
      * 背景必须跨页面连续，所以不能放进各页的 ViewModel。
      *
      * 注意这里不放天气快照：详情页统一按导航携带的缓存 key 从仓库读，
      * 全 app 不留可变单例，避免 null / 旧值竞态。
      */
-    val sceneryController: SceneryController = SceneryController()
+    override val sceneryController: SceneryController = SceneryController()
+
+    /**
+     * 当前城市的跨端最小视图。
+     *
+     * CityRepository 本身留在 app（它的签名带 Room 的 CityEntity），
+     * 这里映射成 CitySelection 只暴露 shared 真正需要的两个字段，
+     * 免得 Room 类型顺着接口渗进跨端代码。
+     */
+    override val currentCity: Flow<CitySelection?> =
+        cityRepository.currentCity.map { entity ->
+            entity?.let { CitySelection(it.province, it.city) }
+        }
 
 }

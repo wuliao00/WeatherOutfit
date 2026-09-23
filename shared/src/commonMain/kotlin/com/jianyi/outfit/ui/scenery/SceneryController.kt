@@ -9,17 +9,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import com.jianyi.outfit.data.model.SceneryMode
 import com.jianyi.outfit.data.model.UserPreferences
-import java.util.Calendar
+import com.jianyi.outfit.platform.currentDayOfYear
+import com.jianyi.outfit.platform.currentMonth
 
 /** 各页取用风景控制器（背景在根节点，页面只负责上报滚动量与读当前风景） */
 val LocalSceneryController = staticCompositionLocalOf<SceneryController?> { null }
 
 /**
- * 风景换景的中央状态机，挂在 AppContainer 上（全应用单例）。
+ * 风景换景的中央状态机，挂在依赖容器上（全应用单例）。
  *
  * 为什么放容器而不是各页 ViewModel：背景要跨页面连续。
  * 如果每页自己算一张，从首页进详情页就会看到背景「跳」一下，
  * 而用户横滑换景后回到首页，背景又会退回旧的那张。
+ *
+ * 日期与月份走 platform 的 expect/actual：Java 的 `Calendar.MONTH` 是 0 基、
+ * iOS 的 NSCalendar 是 1 基，直接写 Calendar 会让 iOS 悄悄选错季节风景。
  */
 @Stable
 class SceneryController {
@@ -80,7 +84,7 @@ class SceneryController {
             }
 
             SceneryMode.DAILY_ROTATE -> {
-                val todays = Scenery.forDay(Calendar.getInstance().get(Calendar.DAY_OF_YEAR))
+                val todays = Scenery.forDay(currentDayOfYear())
                 resolveWith(todays, "今天轮到「${todays.label}」")
             }
 
@@ -95,7 +99,7 @@ class SceneryController {
             tempC = snapshot.tempC,
             hour = snapshot.hour,
             windScale = snapshot.windScale,
-            month = Calendar.getInstance().get(Calendar.MONTH) + 1
+            month = currentMonth()
         )
         resolveWith(pick.scenery, "自动选景：${pick.reason}")
     }

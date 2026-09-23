@@ -13,6 +13,7 @@ import com.jianyi.outfit.data.remote.WeatherCacheCodec
 import com.jianyi.outfit.data.remote.WeatherEnvelope
 import com.jianyi.outfit.data.remote.WeatherResponse
 import com.jianyi.outfit.engine.OutfitRecommendationEngine
+import com.jianyi.outfit.platform.formatGeoKey
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -82,7 +83,7 @@ class WeatherRepositoryImpl(
 
     override suspend fun byLatLon(lat: Double, lon: Double, force: Boolean): Result<WeatherNow> {
         val (api, creds) = apiContext()
-        return fetchOrCache(String.format(Locale.US, "loc|%.2f|%.2f", lat, lon), force, tag = "latlon") {
+        return fetchOrCache(formatGeoKey(lat, lon), force, tag = "latlon") {
             api.queryByLatLon(creds.id, creds.key, lat, lon)
         }
     }
