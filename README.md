@@ -112,7 +112,8 @@
 一个诚实的降级：**极端天气预警**在 iOS 上做不到 Android 那种随时推送，那需要 APNs 与后端。
 
 迁移进度（进行中）：~~领域层抽出 shared（引擎 + 模型）~~ ✅ → ~~CI 编译 shared 的 iOS target~~ ✅
-→ ~~天气网络层换 Ktor + kotlinx.serialization（DTO 与缓存编解码进 commonMain，Gson↔kotlinx 等价性由对拍单测钉住；穿搭模板仍暂用 Gson）~~ ✅
+→ ~~天气网络层换 Ktor + kotlinx.serialization（DTO 与缓存编解码进 commonMain，Gson↔kotlinx 等价性由对拍单测钉住）~~ ✅
+→ ~~穿搭模板清单迁离 Gson（至此主代码零 Gson；Gson 仅留作对拍测试参照）~~ ✅
 → 剩余 UI 层进 commonMain（Glass / Motion / 各页面、Coil→Coil3）→ iOS 入口与平台实现 → 通知抽象与 iOS 本地通知。
 
 > 想在 macOS 上直接跑：`cd ios-probe && ../gradlew compileKotlinIosArm64`。
