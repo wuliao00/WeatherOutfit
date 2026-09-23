@@ -3,7 +3,7 @@ package com.jianyi.outfit.ui.detail
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.jianyi.outfit.WeatherOutfitApp
+import com.jianyi.outfit.data.AppDependencies
 import com.jianyi.outfit.data.model.CustomOutfitTemplate
 import com.jianyi.outfit.data.model.OutfitRecommendation
 import com.jianyi.outfit.data.model.UserPreferences
@@ -34,11 +34,9 @@ data class OutfitDetailUiState(
  * - 管理用户自定义穿搭模板
  */
 class OutfitDetailViewModel(
-    app: WeatherOutfitApp,
+    private val deps: AppDependencies,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
-
-    private val container = app.container
 
     private val _uiState = MutableStateFlow(OutfitDetailUiState())
     val uiState: StateFlow<OutfitDetailUiState> = _uiState.asStateFlow()
@@ -48,7 +46,7 @@ class OutfitDetailViewModel(
         val cacheKey = savedStateHandle.get<String>(DETAIL_ARG_CACHE_KEY).orEmpty()
         if (cacheKey.isNotBlank()) {
             viewModelScope.launch {
-                container.weatherRepository.cachedWeather(cacheKey)?.let { weather ->
+                deps.weatherRepository.cachedWeather(cacheKey)?.let { weather ->
                     _uiState.update {
                         it.copy(
                             weather = weather,
@@ -60,7 +58,7 @@ class OutfitDetailViewModel(
         }
         // 偏好变化 → 重算推荐
         viewModelScope.launch {
-            container.settingsRepository.preferences.collect { prefs ->
+            deps.settingsRepository.preferences.collect { prefs ->
                 _uiState.update { state ->
                     state.copy(
                         prefs = prefs,
@@ -72,7 +70,7 @@ class OutfitDetailViewModel(
         }
         // 模板列表
         viewModelScope.launch {
-            container.templateRepository.templates.collect { list ->
+            deps.templateRepository.templates.collect { list ->
                 _uiState.update { it.copy(templates = list) }
             }
         }
@@ -92,7 +90,7 @@ class OutfitDetailViewModel(
             return
         }
         viewModelScope.launch {
-            container.templateRepository.save(
+            deps.templateRepository.save(
                 CustomOutfitTemplate(
                     name = name.trim(),
                     scene = scene,
@@ -108,7 +106,7 @@ class OutfitDetailViewModel(
 
     /** 删除模板 */
     fun deleteTemplate(id: Long) {
-        viewModelScope.launch { container.templateRepository.delete(id) }
+        viewModelScope.launch { deps.templateRepository.delete(id) }
     }
 
     fun consumeMessage() {

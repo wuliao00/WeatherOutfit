@@ -2,7 +2,7 @@ package com.jianyi.outfit.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.jianyi.outfit.WeatherOutfitApp
+import com.jianyi.outfit.data.AppDependencies
 import com.jianyi.outfit.data.model.Gender
 import com.jianyi.outfit.data.model.GlassQuality
 import com.jianyi.outfit.data.model.SceneryMode
@@ -12,7 +12,6 @@ import com.jianyi.outfit.data.model.ToleranceLevel
 import com.jianyi.outfit.data.model.UserPreferences
 import com.jianyi.outfit.data.model.WindUnit
 import com.jianyi.outfit.data.repository.ApiCredentials
-import com.jianyi.outfit.notification.DailyPushScheduler
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,56 +29,55 @@ data class SettingsUiState(
 
 /**
  * 设置页 ViewModel：穿搭偏好、单位设置、通知设置、API 凭证。
- * 每日推送开关 / 时刻变化时同步对齐 WorkManager 周期任务（持久化，重启自动恢复）。
+ * 每日推送开关 / 时刻变化时同步对齐持久化任务（Android = WorkManager 周期任务，
+ * 重启自动恢复；iOS = 预定本地通知，系统自带持久性）。
  */
-class SettingsViewModel(private val app: WeatherOutfitApp) : ViewModel() {
-
-    private val container = app.container
+class SettingsViewModel(private val deps: AppDependencies) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
     init {
         viewModelScope.launch {
-            container.settingsRepository.preferences.collect { prefs ->
+            deps.settingsRepository.preferences.collect { prefs ->
                 _uiState.update { it.copy(prefs = prefs) }
             }
         }
         viewModelScope.launch {
-            container.settingsRepository.apiCredentials.collect { creds ->
+            deps.settingsRepository.apiCredentials.collect { creds ->
                 _uiState.update { it.copy(apiCredentials = creds) }
             }
         }
     }
 
     fun setTempUnit(unit: TempUnit) {
-        viewModelScope.launch { container.settingsRepository.setTempUnit(unit) }
+        viewModelScope.launch { deps.settingsRepository.setTempUnit(unit) }
     }
 
     fun setWindUnit(unit: WindUnit) {
-        viewModelScope.launch { container.settingsRepository.setWindUnit(unit) }
+        viewModelScope.launch { deps.settingsRepository.setWindUnit(unit) }
     }
 
     fun setTolerance(level: ToleranceLevel) {
-        viewModelScope.launch { container.settingsRepository.setTolerance(level) }
+        viewModelScope.launch { deps.settingsRepository.setTolerance(level) }
     }
 
     fun setStyle(style: StylePreference) {
-        viewModelScope.launch { container.settingsRepository.setStyle(style) }
+        viewModelScope.launch { deps.settingsRepository.setStyle(style) }
     }
 
     fun setGender(gender: Gender) {
-        viewModelScope.launch { container.settingsRepository.setGender(gender) }
+        viewModelScope.launch { deps.settingsRepository.setGender(gender) }
     }
 
-    /** 每日穿搭推送：持久化偏好 + 注册/取消 WorkManager 周期任务 */
+    /** 每日穿搭推送：持久化偏好 + 注册/取消持久化周期任务 */
     fun setDailyPush(enabled: Boolean) {
         viewModelScope.launch {
-            container.settingsRepository.setDailyPush(enabled)
+            deps.settingsRepository.setDailyPush(enabled)
             if (enabled) {
-                DailyPushScheduler.ensureScheduled(app, container.settingsRepository.preferences.first().dailyPushHour)
+                deps.pushScheduler.ensureScheduled(deps.settingsRepository.preferences.first().dailyPushHour)
             } else {
-                DailyPushScheduler.cancel(app)
+                deps.pushScheduler.cancel()
             }
         }
     }
@@ -87,23 +85,23 @@ class SettingsViewModel(private val app: WeatherOutfitApp) : ViewModel() {
     /** 修改推送时刻：持久化 + 已开启推送时按新时刻对齐周期任务 */
     fun setDailyPushHour(hour: Int) {
         viewModelScope.launch {
-            container.settingsRepository.setDailyPushHour(hour)
-            if (container.settingsRepository.preferences.first().dailyPushEnabled) {
-                DailyPushScheduler.ensureScheduled(app, hour)
+            deps.settingsRepository.setDailyPushHour(hour)
+            if (deps.settingsRepository.preferences.first().dailyPushEnabled) {
+                deps.pushScheduler.ensureScheduled(hour)
             }
         }
     }
 
     /** 极端天气预警开关 */
     fun setExtremeAlert(enabled: Boolean) {
-        viewModelScope.launch { container.settingsRepository.setExtremeAlert(enabled) }
+        viewModelScope.launch { deps.settingsRepository.setExtremeAlert(enabled) }
     }
 
 
     /** 保存用户自填的 API 凭证（空值 = 清除自填，回退内置默认凭证） */
     fun saveApiCredentials(id: String, key: String, apiUrl: String) {
         viewModelScope.launch {
-            container.settingsRepository.setApiCredentials(id, key, apiUrl)
+            deps.settingsRepository.setApiCredentials(id, key, apiUrl)
             _uiState.update {
                 it.copy(
                     message = if (id.isBlank() && key.isBlank()) {
@@ -119,7 +117,7 @@ class SettingsViewModel(private val app: WeatherOutfitApp) : ViewModel() {
 /* ============ 视觉与性能 ============ */
 
     fun setSceneryMode(mode: SceneryMode) {
-        viewModelScope.launch { container.settingsRepository.setSceneryMode(mode) }
+        viewModelScope.launch { deps.settingsRepository.setSceneryMode(mode) }
     }
 
     /**
@@ -129,31 +127,31 @@ class SettingsViewModel(private val app: WeatherOutfitApp) : ViewModel() {
      */
     fun pinScenery(key: String) {
         viewModelScope.launch {
-            container.settingsRepository.setSceneryMode(SceneryMode.FIXED)
-            container.settingsRepository.setSceneryKey(key)
+            deps.settingsRepository.setSceneryMode(SceneryMode.FIXED)
+            deps.settingsRepository.setSceneryKey(key)
         }
     }
 
     fun setGlassQuality(quality: GlassQuality) {
-        viewModelScope.launch { container.settingsRepository.setGlassQuality(quality) }
+        viewModelScope.launch { deps.settingsRepository.setGlassQuality(quality) }
     }
 
     fun setParallax(enabled: Boolean) {
-        viewModelScope.launch { container.settingsRepository.setParallaxEnabled(enabled) }
+        viewModelScope.launch { deps.settingsRepository.setParallaxEnabled(enabled) }
     }
 
     fun setBreathing(enabled: Boolean) {
-        viewModelScope.launch { container.settingsRepository.setBreathingEnabled(enabled) }
+        viewModelScope.launch { deps.settingsRepository.setBreathingEnabled(enabled) }
     }
 
     fun setHighFrameRate(enabled: Boolean) {
-        viewModelScope.launch { container.settingsRepository.setHighFrameRateEnabled(enabled) }
+        viewModelScope.launch { deps.settingsRepository.setHighFrameRateEnabled(enabled) }
     }
 
     /** 重置免责声明确认状态：下次启动重新弹出使用须知 */
     fun resetDisclaimer() {
         viewModelScope.launch {
-            container.settingsRepository.setDisclaimerAccepted(false)
+            deps.settingsRepository.setDisclaimerAccepted(false)
             _uiState.update { it.copy(message = "已重置，下次启动将重新展示使用须知") }
         }
     }

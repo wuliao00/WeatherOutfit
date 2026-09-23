@@ -1,6 +1,8 @@
 package com.jianyi.outfit.di
 
 import android.content.Context
+import com.jianyi.outfit.data.AppDependencies
+import com.jianyi.outfit.data.PushScheduler
 import com.jianyi.outfit.data.local.AppDatabase
 import com.jianyi.outfit.data.local.WeatherCacheDatabase
 import com.jianyi.outfit.data.repository.CityRepository
@@ -11,6 +13,7 @@ import com.jianyi.outfit.data.repository.SettingsRepository
 import com.jianyi.outfit.data.repository.SettingsRepositoryImpl
 import com.jianyi.outfit.data.repository.WeatherRepository
 import com.jianyi.outfit.data.repository.WeatherRepositoryImpl
+import com.jianyi.outfit.notification.DailyPushScheduler
 import com.jianyi.outfit.util.LocationUtil
 import com.jianyi.outfit.ui.scenery.SceneryController
 
@@ -18,8 +21,11 @@ import com.jianyi.outfit.ui.scenery.SceneryController
  * 手动依赖容器（项目体量小，不引入 Hilt 等框架）。
  * 由 Application 持有，全 app 单例。
  * 字段类型为仓库接口，ViewModel 只依赖抽象，便于 JVM 单测替换实现。
+ *
+ * 实现 shared 的 AppDependencies：shared 里的 ViewModel（设置/详情）只认这个接口，
+ * 不再拿 Application 转 AppContainer——这是 ViewModel 跨端的 DI 接缝。
  */
-class AppContainer(context: Context) {
+class AppContainer(context: Context) : AppDependencies {
 
     /** Room 业务库：历史城市、穿搭模板 */
     val database: AppDatabase = AppDatabase.build(context)
@@ -28,11 +34,12 @@ class AppContainer(context: Context) {
     private val cacheDatabase: WeatherCacheDatabase = WeatherCacheDatabase.build(context)
 
     /** 设置仓库（Preferences DataStore）：需先于天气仓库创建，供其读取凭证 */
-    val settingsRepository: SettingsRepository = SettingsRepositoryImpl(context.applicationContext)
+    override val settingsRepository: SettingsRepository =
+        SettingsRepositoryImpl(context.applicationContext)
 
     /** 天气数据仓库：凭证取值「用户自填优先，否则 BuildConfig 默认」
      *  不再需要 gson —— 序列化随网络层一起搬进了 shared（kotlinx.serialization） */
-    val weatherRepository: WeatherRepository = WeatherRepositoryImpl(
+    override val weatherRepository: WeatherRepository = WeatherRepositoryImpl(
         credentials = settingsRepository.apiCredentials,
         cacheDao = cacheDatabase.weatherCacheDao()
     )
@@ -41,8 +48,16 @@ class AppContainer(context: Context) {
     val cityRepository: CityRepository = CityRepositoryImpl(database.cityDao())
 
     /** 穿搭模板仓库 */
-    val templateRepository: OutfitTemplateRepository =
+    override val templateRepository: OutfitTemplateRepository =
         OutfitTemplateRepositoryImpl(database.outfitTemplateDao())
+
+    /** 每日推送调度能力：Android 侧包装 WorkManager 静态工具 */
+    override val pushScheduler: PushScheduler = object : PushScheduler {
+        override fun ensureScheduled(pushHour: Int) =
+            DailyPushScheduler.ensureScheduled(context.applicationContext, pushHour)
+
+        override fun cancel() = DailyPushScheduler.cancel(context.applicationContext)
+    }
 
     /** 定位工具 */
     val locationUtil: LocationUtil = LocationUtil(context.applicationContext)

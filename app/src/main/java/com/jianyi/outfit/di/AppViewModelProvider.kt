@@ -19,9 +19,9 @@ object AppViewModelProvider {
 
     val Factory = viewModelFactory {
         initializer { HomeViewModel(app()) }
-        initializer { OutfitDetailViewModel(app(), createSavedStateHandle()) }
+        initializer { OutfitDetailViewModel(app().container, createSavedStateHandle()) }
         initializer { CityViewModel(app()) }
-        initializer { SettingsViewModel(app()) }
+        initializer { SettingsViewModel(app().container) }
     }
 
     /** 从 CreationExtras 中取出应用实例 */
