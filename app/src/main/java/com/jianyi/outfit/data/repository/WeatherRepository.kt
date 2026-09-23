@@ -23,41 +23,11 @@ import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
 
-/** 接口业务错误（code != 200 时抛出，msg 用于用户提示） */
-open class ApiException(message: String) : Exception(message)
-
-/** 限流错误（公共凭证共享频次被打爆时出现），retryAfterSec 为接口建议的等待秒数 */
-class RateLimitedException(message: String, val retryAfterSec: Int) : ApiException(message)
-
-/**
- * 天气数据仓库接口：统一「缓存 → 网络 → 过期缓存回退」策略，
- * 面向 ViewModel 与后台任务的抽象，便于 JVM 单测替换实现。
- */
-interface WeatherRepository {
-
-    /** IP 自动定位查询（GPS 不可用时的兜底定位） */
-    suspend fun byIp(ip: String? = null, force: Boolean = false): Result<WeatherNow>
-
-    /** 地址查询（省 + 市/区） */
-    suspend fun byAddress(province: String, city: String, force: Boolean = false): Result<WeatherNow>
-
-    /** 经纬度查询（GPS 定位后精确查询） */
-    suspend fun byLatLon(lat: Double, lon: Double, force: Boolean = false): Result<WeatherNow>
-
-    /** 查询未来 7 天预报（不缓存） */
-    suspend fun forecast(province: String, city: String): Result<List<ForecastDay>>
-
-    /**
-     * 读取缓存的天气快照（忽略 TTL）。
-     * 供穿搭详情页按缓存 key 复用首页刚加载的数据，避免重复请求与全局可变状态。
-     */
-    suspend fun cachedWeather(cacheKey: String): WeatherNow?
-}
-
 /**
  * 天气数据仓库实现。
  * 凭证解析：用户在设置页自填的 id/key/apiUrl 优先，留空回退 BuildConfig 内置默认；
  * 客户端按 baseUrl 缓存复用（Ktor 的 HttpClient 内部持有连接池，一个地址一个实例）。
+ * 接口与异常类型在 shared 的同名文件里（同包，无需 import）。
  */
 class WeatherRepositoryImpl(
     private val credentials: Flow<ApiCredentials>,
