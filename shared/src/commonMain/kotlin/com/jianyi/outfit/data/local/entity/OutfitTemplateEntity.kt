@@ -2,6 +2,7 @@ package com.jianyi.outfit.data.local.entity
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import com.jianyi.outfit.platform.currentTimeMillis
 
 /**
  * 自定义穿搭模板表：用户保存的穿搭方案，
@@ -16,5 +17,5 @@ data class OutfitTemplateEntity(
     val maxTemp: Int,               // 适配最高温（℃）
     val itemsJson: String,          // 单品清单（JSON 数组字符串）
     val tip: String,                // 搭配小贴士
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = currentTimeMillis()
 )

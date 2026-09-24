@@ -13,7 +13,17 @@ composeBom = "2025.06.01"
 # 能编 iOS，所以这里不需要动 Kotlin / AGP / compileSdk。
 composeMp = "1.8.2"
 navigationCompose = "2.8.5"
-room = "2.6.1"
+# Room 2.7 起本身是 KMP 库（room-runtime 有 iosArm64 产物），持久层才能整体下沉 shared。
+# 版本不是随手挑的：实测 room-runtime-iosarm64/2.7.2 的 klib manifest 是
+# abi_version=1.201.0 / compiler_version=2.1.10，而 Kotlin 2.1.0 自己的 abi 线同样是
+# 1.201.0（对照 kotlinx-coroutines-core-iosarm64/1.10.1：2.1.0 + 1.201.0），
+# 所以我们的编译器读得懂它。2.8.x 编在 Kotlin 2.2 上（abi 2.2.0），换过去必须先升 Kotlin。
+# 同理 room-ktx 删掉 —— 2.7 已把 Flow / suspend 支持并进 room-runtime，留着只是空壳。
+room = "2.7.2"
+# 非 Android target 的 SQLite 驱动（自带 sqlite3 二进制）。minCompileSdk=34，不动 compileSdk。
+# 钉 2.5.1 是因为 room-runtime 2.7.2 的 pom 里 sqlite / sqlite-framework 就是 2.5.1，
+# 版本错开会出现两份 sqlite。
+sqliteBundled = "2.5.1"
 # Gson 已从主代码彻底移除；仅测试还在用 —— 对拍测试拿它当"参照实现"，
 # 钉住 kotlinx.serialization 与旧版解析行为逐字段一致、落盘格式双向兼容
 gson = "2.10.1"
@@ -72,8 +82,9 @@ androidx-navigation-compose = { group = "androidx.navigation", name = "navigatio
 
 # 本地存储：Room + DataStore
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
-androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+# iOS 侧的 SQLite 驱动：Room KMP 在非 Android target 上要自带 sqlite3 的打包版驱动
+androidx-sqlite-bundled = { group = "androidx.sqlite", name = "sqlite-bundled", version.ref = "sqliteBundled" }
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 
 # 后台任务：每日推送（WorkManager 持久化，重启后自动恢复）

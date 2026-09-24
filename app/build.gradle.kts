@@ -5,7 +5,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlinx.serialization)
-    alias(libs.plugins.ksp)
+    // KSP 不再在 app 启用：唯一的注解处理器是 Room，它随持久层一起搬进了 shared
 }
 
 // 读取 local.properties 中的天气 API 凭证，避免硬编码进版本库
@@ -83,11 +83,7 @@ android {
     }
 }
 
-// Room 导出 schema 到 app/schemas/，便于后续版本演进时对比与编写迁移
-// （ksp 为 KSP 插件提供的模块级扩展，必须置于 android {} 块之外）
-ksp {
-    arg("room.schemaLocation", "$projectDir/schemas")
-}
+// （KSP / Room schema 已随持久层一起搬到 shared，app 不再跑注解处理器）
 
 dependencies {
     // 领域层（引擎 + 数据模型）。包名与 app 内一致，所以这一步不改任何 import。
@@ -120,10 +116,8 @@ dependencies {
     // 导航
     implementation(libs.androidx.navigation.compose)
 
-    // Room 本地数据库
-    implementation(libs.androidx.room.runtime)
-    implementation(libs.androidx.room.ktx)
-    ksp(libs.androidx.room.compiler)
+    // Room 本地数据库：库定义与开库函数已整体搬到 shared（Room 2.7 起是 KMP 库），
+    // app 只通过 buildAppDatabase(context) 调用，room 依赖随代码一起从这页删掉了。
 
     // DataStore 轻量配置
     implementation(libs.androidx.datastore.preferences)

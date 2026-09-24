@@ -10,6 +10,8 @@ import com.jianyi.outfit.data.NotificationGate
 import com.jianyi.outfit.data.PushScheduler
 import com.jianyi.outfit.data.local.AppDatabase
 import com.jianyi.outfit.data.local.WeatherCacheDatabase
+import com.jianyi.outfit.data.local.buildAppDatabase
+import com.jianyi.outfit.data.local.buildWeatherCacheDatabase
 import com.jianyi.outfit.data.repository.CityRepository
 import com.jianyi.outfit.data.repository.CityRepositoryImpl
 import com.jianyi.outfit.data.repository.OutfitTemplateRepository
@@ -39,11 +41,15 @@ import kotlinx.coroutines.flow.map
  */
 class AppContainer(context: Context) : AppDependencies {
 
-    /** Room 业务库：历史城市、穿搭模板 */
-    val database: AppDatabase = AppDatabase.build(context)
+    /**
+     * Room 业务库：历史城市、穿搭模板。
+     * 库定义与开库函数都在 shared（Room 2.7 起是 KMP 库），androidMain 那份
+     * buildAppDatabase(context) 与升级前逐字同参数，数据目录不变。
+     */
+    val database: AppDatabase = buildAppDatabase(context)
 
     /** 天气缓存库（独立文件 weather_cache.db，备份规则按文件排除） */
-    private val cacheDatabase: WeatherCacheDatabase = WeatherCacheDatabase.build(context)
+    private val cacheDatabase: WeatherCacheDatabase = buildWeatherCacheDatabase(context)
 
     /** 设置仓库（Preferences DataStore）：需先于天气仓库创建，供其读取凭证 */
     override val settingsRepository: SettingsRepository =

@@ -20,6 +20,9 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlinx.serialization)
     alias(libs.plugins.compose.multiplatform)
+    // Room 2.7 的 KMP 支持靠 KSP 为每个 target 生成 `XxxDatabase_Impl` 与
+    // `expect object XxxDatabaseConstructor` 的 actual，所以处理器在本模块启用。
+    alias(libs.plugins.ksp)
 }
 
 kotlin {
@@ -39,6 +42,16 @@ kotlin {
     // 我们没有 Intel 机器可验，加进来只是一个没人跑过的目标。
     iosArm64()
     iosSimulatorArm64()
+
+    /**
+     * Room 的 KMP 要求数据库构造入口写成 `expect object`（见 AppDatabase 里的注释），
+     * 而 Kotlin 2.1 里 expect/actual 类整体还在 beta —— 不禁掉的话每次构建
+     * 都为这 4 处（2 个 expect + 2 个 KSP 生成的 actual）各打一行警告，
+     * 把真正需要看的警告埋掉。这里只静音这一条，不改任何代码语义。
+     */
+    compilerOptions {
+        freeCompilerArgs.add("-Xexpect-actual-classes")
+    }
 
     sourceSets {
         commonMain.dependencies {
@@ -72,6 +85,14 @@ kotlin {
             // 导航参数由 app 侧工厂取出后以 String 传入，commonMain 不引入 SavedStateHandle
             api(libs.androidx.lifecycle.viewmodel)
 
+            /**
+             * Room 2.7 起本身是 KMP 库，所以实体/DAO/库定义都能留在 commonMain。
+             * 用 api() 而不是 implementation()：app 的 AppContainer 里
+             * `val database: AppDatabase` 的直接父类型就是这里的 RoomDatabase，
+             * 藏起来 app 那边就编译不过。
+             */
+            api(libs.androidx.room.runtime)
+
             // 网络层。这里一律 implementation()：DTO 是 shared 的公开类型，
             // 但 Ktor 的 HttpClient 不出现在任何公开签名里，不该泄漏给 app。
             implementation(libs.kotlinx.serialization.json)
@@ -84,11 +105,45 @@ kotlin {
         }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)
+            // iOS 没有 Android 的 SQLite 框架，Room 在这边必须被显式喂一个驱动，
+            // 而 native 的 Builder.build() 第一行就是 requireNotNull(driver)。
+            // sqlite-bundled 带编译好的 sqlite3 二进制，版本跟 room-runtime 的
+            // 传递依赖（androidx.sqlite 2.5.1）对齐，避免两份 sqlite。
+            implementation(libs.androidx.sqlite.bundled)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
         }
     }
+}
+
+/**
+ * Room 注解处理器要挂到每个 target 的 ksp* 配置上。
+ *
+ * 名字不写死：KSP 给 commonMain 元数据编译建的那个配置在不同版本里改过名
+ * （kspCommonMainMetadata / kspCommonMainKotlinMetadata），拼错的表现是
+ * 「Android 编得过、iOS 编不出 Impl」这种只在 CI 才暴露的错。而且本机是 Windows，
+ * iOS target 直接被禁用、那些配置压根不存在，只有 CI 的 mac 上才有 ——
+ * 所以按前缀匹配现存的 ksp* 配置，两端各自挂自己那份。
+ *
+ * 排掉三类：裸 `ksp`（KMP 下已废弃，会打 deprecation 警告）、
+ * `*ProcessorClasspath`（KSP 内部解析用，它已经 extends 了外面的配置，
+ * 再塞一份等于把同一个处理器摆两遍）、`kspNdkLocation`（NDK 路径，不是处理器）。
+ */
+configurations.matching {
+    val n = it.name
+    n.startsWith("ksp") && n != "ksp" &&
+        !n.endsWith("ProcessorClasspath") && !n.contains("NdkLocation")
+}.all {
+    project.dependencies.add(name, libs.androidx.room.compiler)
+}
+
+// schema 导出：从 app 搬到这里，目录结构不变（<库全限定名>/<版本>.json）。
+// 三个 target 会各自导出一次，内容同源所以是同一份 JSON，覆盖写无害。
+// 这份文件是「Room 升级没有改动表结构」的唯一凭据：identityHash 由 schema 算出，
+// schema 逐字不变就等于老用户机器上的数据库仍然被认作同一版本。
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 android {
