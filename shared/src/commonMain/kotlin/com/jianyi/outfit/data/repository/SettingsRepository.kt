@@ -30,7 +30,7 @@ data class ApiCredentials(
 }
 
 /** 设置仓库接口：面向 ViewModel 与其他仓库的抽象，便于 JVM 单测替换实现。
- *  接口在 shared，DataStore 实现留在 app。 */
+ *  实现也在 commonMain（SettingsRepositoryImpl），平台侧只留 PreferenceBackend 那一层落盘。 */
 interface SettingsRepository {
 
     /** 观察用户偏好 */

@@ -119,8 +119,9 @@ dependencies {
     // Room 本地数据库：库定义与开库函数已整体搬到 shared（Room 2.7 起是 KMP 库），
     // app 只通过 buildAppDatabase(context) 调用，room 依赖随代码一起从这页删掉了。
 
-    // DataStore 轻量配置
-    implementation(libs.androidx.datastore.preferences)
+    // DataStore 已随设置仓库实现搬到 shared 的 androidMain：
+    // app 只 new 一个 DataStorePreferenceBackend(context)，它的签名里没有 datastore 类型，
+    // 编译期不需要、运行期由 shared 的 AAR 带进来。
 
     // 后台任务：每日穿搭推送（WorkManager 持久化调度）
     implementation(libs.androidx.work.runtime.ktx)

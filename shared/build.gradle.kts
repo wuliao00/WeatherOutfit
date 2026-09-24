@@ -102,6 +102,9 @@ kotlin {
         }
         androidMain.dependencies {
             implementation(libs.ktor.client.okhttp)
+            // 偏好落盘：Android 侧用 Preferences DataStore（iOS 侧是 NSUserDefaults，
+            // 两边都只认 commonMain 的 PreferenceBackend 那一层）
+            implementation(libs.androidx.datastore.preferences)
         }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)
@@ -113,6 +116,7 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
+            implementation(libs.kotlinx.coroutines.test)
         }
     }
 }

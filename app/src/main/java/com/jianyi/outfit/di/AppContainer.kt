@@ -15,6 +15,7 @@ import com.jianyi.outfit.data.local.buildAppDatabase
 import com.jianyi.outfit.data.local.buildWeatherCacheDatabase
 import com.jianyi.outfit.data.repository.CityRepository
 import com.jianyi.outfit.data.repository.CityRepositoryImpl
+import com.jianyi.outfit.data.repository.DataStorePreferenceBackend
 import com.jianyi.outfit.data.repository.OutfitTemplateRepository
 import com.jianyi.outfit.data.repository.OutfitTemplateRepositoryImpl
 import com.jianyi.outfit.data.repository.SettingsRepository
@@ -54,7 +55,7 @@ class AppContainer(context: Context) : AppDependencies {
 
     /** 设置仓库（Preferences DataStore）：需先于天气仓库创建，供其读取凭证 */
     override val settingsRepository: SettingsRepository =
-        SettingsRepositoryImpl(context.applicationContext)
+        SettingsRepositoryImpl(DataStorePreferenceBackend(context.applicationContext))
 
     /**
      * 天气数据仓库：凭证取值「用户自填优先，否则内置默认」。

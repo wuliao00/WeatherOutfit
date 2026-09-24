@@ -92,6 +92,9 @@ androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx"
 
 # 网络层（shared 模块）：core + JSON 协商放 commonMain，引擎按平台放各自 source set
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
+# 测试框架：commonTest 里跑 suspend 只能靠它（runBlocking 不在公共 API 里）。
+# 版本跟着 coroutines-core 走，iosarm64 制品存在已核实（JVM 侧本机跑，iOS 侧目前 CI 不跑测试）
+kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "kotlinxCoroutines" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 ktor-client-core = { group = "io.ktor", name = "ktor-client-core", version.ref = "ktor" }
 ktor-client-content-negotiation = { group = "io.ktor", name = "ktor-client-content-negotiation", version.ref = "ktor" }
