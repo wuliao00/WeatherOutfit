@@ -269,23 +269,30 @@ class IosExtremeAlerter : ExtremeAlerter {
  * 于是 Kotlin 侧看到的是 val，赋值报 "'val' cannot be reassigned"。
  * 走 KVC（NSObject 的 -setValue:forKey:）绕开，属性名与头文件一致。
  */
+ * 绕法不是猜的：一次性探针文件里把六种写法各编一遍推给 CI，一次问出只有两种成立 ——
+ * ① ObjC setter 函数 `setTitle(...)`；② **把静态类型收成 NSObject 再走 KVC**
+ * （同一个 `setValue(_:forKey:)` 在 UNMutableNotificationContent 视图下解析不到成员，
+ * 只有 NSObject 视图能解析）。这里选 ②：title/body/sound 一次用同一条已证明的路径，
+ * 不必赌 `setBody:` / `setSound:` 是否也照样导出。
+ */
 private fun buildRequest(
     identifier: String,
     title: String,
     body: String,
     trigger: UNNotificationTrigger
-): UNNotificationRequest =
-    UNMutableNotificationContent().apply {
+): UNNotificationRequest {
+    val content = UNMutableNotificationContent()
+    (content as NSObject).apply {
         setValue(title, forKey = "title")
         setValue(body, forKey = "body")
         setValue(UNNotificationSound.defaultSound(), forKey = "sound")
-    }.let { content ->
-        UNNotificationRequest.requestWithIdentifier(
-            identifier = identifier,
-            content = content,
-            trigger = trigger
-        )
     }
+    return UNNotificationRequest.requestWithIdentifier(
+        identifier = identifier,
+        content = content,
+        trigger = trigger
+    )
+}
 
 /* ==================== 高帧率 ==================== */
 
