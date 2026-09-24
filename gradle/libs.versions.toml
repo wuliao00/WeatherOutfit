@@ -24,7 +24,10 @@ ktor = "3.0.3"
 kotlinxSerialization = "1.7.3"
 # coroutines 与 ktor 3.0.3 传递依赖的版本保持一致，避免双版本
 kotlinxCoroutines = "1.9.0"
-coil = "2.7.0"
+# Coil3（多平台图片加载）。刻意停在 3.0.4：它编在 Kotlin 2.0.21 上，
+# 元数据比我们的 2.1.0 编译器旧；3.1.0 起是 2.1.10，3.2+ 是 2.2，
+# 后者会触发「库的元数据比编译器新」硬错误（本项目在 Haze 上吃过同款）。
+coil3 = "3.0.4"
 datastore = "1.1.1"
 work = "2.9.1"
 playServicesLocation = "21.3.0"
@@ -86,7 +89,10 @@ ktor-client-okhttp = { group = "io.ktor", name = "ktor-client-okhttp", version.r
 ktor-client-darwin = { group = "io.ktor", name = "ktor-client-darwin", version.ref = "ktor" }
 
 # 图片加载
-coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
+# 图片加载：Coil3 多平台版。compose 是 AsyncImage，network-okhttp 是 Android 引擎
+# （Coil3 不再自带网络栈，不加引擎网络图会静默空白）
+coil3-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil3" }
+coil3-network-okhttp = { group = "io.coil-kt.coil3", name = "coil-network-okhttp", version.ref = "coil3" }
 
 # JSON：仅测试用（对拍参照实现），主代码一律 kotlinx-serialization-json
 gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }

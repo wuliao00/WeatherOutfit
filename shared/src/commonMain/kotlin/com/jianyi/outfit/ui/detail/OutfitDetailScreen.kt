@@ -66,12 +66,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.runtime.collectAsState
 import com.jianyi.outfit.data.model.CustomOutfitTemplate
 import com.jianyi.outfit.data.model.OutfitPlan
 import com.jianyi.outfit.data.model.OutfitRecommendation
-import com.jianyi.outfit.di.AppViewModelProvider
 import com.jianyi.outfit.engine.OutfitRecommendationEngine
 import com.jianyi.outfit.ui.components.EmptyHint
 import com.jianyi.outfit.ui.glass.GlassEmphasis
@@ -90,14 +88,18 @@ import kotlinx.coroutines.launch
  * 三套场景用 HorizontalPager 而不是三个 Tab：
  * 手指拖动时页面本身跟手，指示器再读同一个 pagerState 的 offsetFraction，
  * 两者天然同步——不需要「点击后动画追上」这一步。
+ *
+ * ViewModel 由调用方注入（默认值会把它钉死在 Android 的工厂上，跨不了端）。
+ * 用 collectAsState 而不是 collectAsStateWithLifecycle：后者在 androidx/JB 的
+ * 当前版本都没有 iOS 产物；对 conflated 的 StateFlow 两者观感一致。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OutfitDetailScreen(
     onBack: () -> Unit,
-    viewModel: OutfitDetailViewModel = viewModel(factory = AppViewModelProvider.Factory)
+    viewModel: OutfitDetailViewModel
 ) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val state by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     var showAddDialog by androidx.compose.runtime.saveable.rememberSaveable {
         mutableStateOf(false)

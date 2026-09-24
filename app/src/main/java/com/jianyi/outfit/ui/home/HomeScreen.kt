@@ -78,7 +78,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import coil.compose.AsyncImage
+import coil3.compose.AsyncImage
 import com.jianyi.outfit.data.model.TempUnit
 import com.jianyi.outfit.data.model.WeatherNow
 import com.jianyi.outfit.di.AppViewModelProvider
@@ -547,12 +547,19 @@ private fun HeroSection(weather: WeatherNow, state: HomeUiState) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         weather.iconUrl?.let { url ->
-            AsyncImage(
-                model = url,
-                contentDescription = weather.condition,
-                modifier = Modifier.size(64.dp)
-            )
-            Spacer(Modifier.height(4.dp))
+            // 图标拉不到时整块收起：留一个 64dp 空洞比没有图标更难看。
+            // 天气图标是外部 CDN 的图，DNS 失败/无网/被分流都是常态
+            // （实测某台机器 VPN 分流下 rescdn.apihz.cn 直接 ERR_NAME_NOT_RESOLVED）。
+            var iconFailed by remember(url) { mutableStateOf(false) }
+            if (!iconFailed) {
+                AsyncImage(
+                    model = url,
+                    contentDescription = weather.condition,
+                    onError = { iconFailed = true },
+                    modifier = Modifier.size(64.dp)
+                )
+                Spacer(Modifier.height(4.dp))
+            }
         }
 
         val (value, unit) = Formatters.tempSplit(

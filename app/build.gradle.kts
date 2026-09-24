@@ -140,7 +140,9 @@ dependencies {
     testImplementation(libs.gson)
 
     // 图片加载
-    implementation(libs.coil.compose)
+    // 图片加载：Coil3 多平台版 + Android 的 OkHttp 引擎
+    implementation(libs.coil3.compose)
+    implementation(libs.coil3.network.okhttp)
 
     // 定位
     implementation(libs.play.services.location)

@@ -54,6 +54,8 @@ kotlin {
             api(compose.animation)
             api(compose.material3)
             api(compose.components.resources)
+            // 扩展图标集（MoneyOff / WbSunny / BusinessCenter 等），组件与页面在用
+            implementation(compose.materialIconsExtended)
 
             // 液态玻璃。HazeState 出现在 GlassHost 的公开构造参数里，必须 api()
             api(libs.haze.core)

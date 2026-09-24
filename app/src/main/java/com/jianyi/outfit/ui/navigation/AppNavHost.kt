@@ -9,11 +9,13 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.runtime.Composable
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.jianyi.outfit.di.AppViewModelProvider
 import com.jianyi.outfit.ui.city.CityScreen
 import com.jianyi.outfit.ui.detail.DETAIL_ARG_CACHE_KEY
 import com.jianyi.outfit.ui.detail.OutfitDetailScreen
@@ -86,7 +88,8 @@ fun AppNavHost() {
             )
         ) {
             OutfitDetailScreen(
-                onBack = { navController.popBackStack() }
+                onBack = { navController.popBackStack() },
+                viewModel = viewModel(factory = AppViewModelProvider.Factory)
             )
         }
         composable(Routes.CITY) {
