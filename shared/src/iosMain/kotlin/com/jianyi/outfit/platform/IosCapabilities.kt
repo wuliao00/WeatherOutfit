@@ -268,11 +268,17 @@ class IosExtremeAlerter : ExtremeAlerter {
  * 而 cinterop 沿用父类视图，Kotlin 侧看到的就是 val，赋值报
  * "'val' cannot be reassigned"。
  *
- * 绕法不是猜的：一次性探针文件里把六种写法各编一遍推给 CI，一次问出只有两种成立 ——
- * ① ObjC setter 函数 `setTitle(...)`；② **把静态类型收成 NSObject 再走 KVC**
- * （同一个 `setValue(_:forKey:)` 在 UNMutableNotificationContent 视图下解析不到成员，
- * 只有 NSObject 视图能解析）。这里选 ②：title/body/sound 一次用同一条已证明的路径，
- * 不必赌 `setBody:` / `setSound:` 是否也照样导出。
+ * 绕法是**探针问出来的**，不是猜的：一次性探针文件把六种写法各编一遍推给 CI，
+ * 只有两种编得过 ——
+ * ① ObjC setter 函数：`content.setTitle(x)`（属性虽然被看成 val，setter 照样导出）；
+ * ② `performSelector(NSSelectorFromString("setTitle:"), withObject = x)`。
+ * 四种 KVC 变体（含"把静态类型收成 NSObject 再 setValue(_:forKey:)"）**全部解析不到成员**，
+ * 候选里只剩 Kotlin 属性委托的那个 setValue —— 这条是我上一轮读错探针行号、
+ * 白烧了一次 CI 才定下来的。
+ *
+ * 选 ①：编译期就检查得了解析器名字，比 performSelector 的"运行期 unrecognized selector"
+ * 好。三个 setter 同一来源（同一批被 cinterop 看成 val 的属性），所以有理由相信
+ * setBody / setSound 与 setTitle 一样导出 —— 万一没有，是编译错而不是静默崩。
  */
 private fun buildRequest(
     identifier: String,
@@ -281,11 +287,9 @@ private fun buildRequest(
     trigger: UNNotificationTrigger
 ): UNNotificationRequest {
     val content = UNMutableNotificationContent()
-    (content as NSObject).apply {
-        setValue(title, forKey = "title")
-        setValue(body, forKey = "body")
-        setValue(UNNotificationSound.defaultSound(), forKey = "sound")
-    }
+    content.setTitle(title)
+    content.setBody(body)
+    content.setSound(UNNotificationSound.defaultSound())
     return UNNotificationRequest.requestWithIdentifier(
         identifier = identifier,
         content = content,
