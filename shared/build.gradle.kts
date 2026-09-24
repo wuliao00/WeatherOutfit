@@ -38,10 +38,30 @@ kotlin {
         }
     }
 
-    // 真机 + Apple Silicon 模拟器。iosX64（Intel 模拟器）故意不加：
-    // 我们没有 Intel 机器可验，加进来只是一个没人跑过的目标。
-    iosArm64()
-    iosSimulatorArm64()
+    /**
+     * 两个 iOS target 各配一份 framework（baseName = Swift 侧的 `import Shared`）。
+     *
+     * 不写成 `ios { }` 简写：那个 API 在 Kotlin 2.1 里已经是
+     * "The ios() target shortcut is deprecated and no longer supported"，
+     * 而且是**配置阶段**就抛错，本机连 Android 构建都会被一起拖死（实测过一次）。
+     *
+     * 选静态库（isStatic = true）是 KMP 官方向导的默认：链接期把 Kotlin 运行时并进去，
+     * Xcode 侧少一个要 embed & sign 的动态库。怎么接工程见 README「跑 iOS」一节。
+     *
+     * iosX64（Intel 模拟器）故意不加：我们没有 Intel 机器可验，加进来只是没人跑过的目标。
+     */
+    iosArm64 {
+        binaries.framework {
+            baseName = "Shared"
+            isStatic = true
+        }
+    }
+    iosSimulatorArm64 {
+        binaries.framework {
+            baseName = "Shared"
+            isStatic = true
+        }
+    }
 
     /**
      * Room 的 KMP 要求数据库构造入口写成 `expect object`（见 AppDatabase 里的注释），
@@ -113,6 +133,9 @@ kotlin {
             // sqlite-bundled 带编译好的 sqlite3 二进制，版本跟 room-runtime 的
             // 传递依赖（androidx.sqlite 2.5.1）对齐，避免两份 sqlite。
             implementation(libs.androidx.sqlite.bundled)
+            // 天气图标的网络加载。Coil3 不自带网络栈，不挂引擎就是静默空白
+            // （Android 侧在 WeatherOutfitApp 挂的 OkHttp，这边对位挂 Ktor）
+            implementation(libs.coil3.network.ktor3)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))

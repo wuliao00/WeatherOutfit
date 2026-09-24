@@ -107,6 +107,8 @@ ktor-client-darwin = { group = "io.ktor", name = "ktor-client-darwin", version.r
 # （Coil3 不再自带网络栈，不加引擎网络图会静默空白）
 coil3-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil3" }
 coil3-network-okhttp = { group = "io.coil-kt.coil3", name = "coil-network-okhttp", version.ref = "coil3" }
+# iOS 的图片网络引擎：Coil3 的 Ktor 适配（它内部就是我们已经在用的 ktor-client + Darwin）
+coil3-network-ktor3 = { group = "io.coil-kt.coil3", name = "coil-network-ktor3", version.ref = "coil3" }
 
 # JSON：仅测试用（对拍参照实现），主代码一律 kotlinx-serialization-json
 gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }

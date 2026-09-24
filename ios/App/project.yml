@@ -1,0 +1,52 @@
+# XcodeGen 的工程描述（不是 .xcodeproj 本身）。
+#
+# 为什么不直接提交 .xcodeproj：pbxproj 是人读不了也 check 不了的 400 行手工格式，
+# 而我这边**没有任何办法验证它**（没有 macOS）。XcodeGen 的写法是把工程里真正重要的
+# 那 30 个决定放进版本库，其余交给 `xcodegen generate`：
+#
+#     brew install xcodegen
+#     cd ios/App && xcodegen generate      # 生成 Jianyi.xcodeproj，然后照常 Run
+#
+# 不想装 xcodegen 也行：在 Xcode 里新建一个 iOS App 工程，然后照下面三处配一遍
+# —— ①Framework Search Paths ②-framework Shared ③编译前的 gradle 脚本，
+# 步骤写在 README 的「跑 iOS」一节。
+#
+# ⚠ 这个文件同样没被执行过（本机 Windows）。它是标准 KMP 向导形状，
+# 但真在 Mac 上第一次跑，可能要按 Xcode 版本调 build setting。
+
+name: Jianyi
+
+options:
+  bundleIdPrefix: com.jianyi
+  deploymentTarget:
+    iOS: "15.0"
+
+settings:
+  base:
+    # shared 模块里 `ios { binaries.framework { baseName = "Shared"; isStatic = true } }`
+    # 的产物由 embedAndSignAppleFramework 输出到这个目录，按配置与 SDK 分子目录
+    FRAMEWORK_SEARCH_PATHS: $(inherited) $(SRCROOT)/../../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)
+    OTHER_LDFLAGS: $(inherited) -framework Shared
+
+targets:
+  Jianyi:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+    info:
+      path: Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jianyi.outfit.ios
+        TARGETED_DEVICE_FAMILY: "1"
+    preBuildScripts:
+      - name: Build Kotlin Framework
+        script: |
+          set -euo pipefail
+          cd "$SRCROOT/../.."
+          ./gradlew :shared:embedAndSignAppleFramework
+        outputFilesCompilerFlags:
+          - -framework
+          - Shared
+        showEnvVarsInLog: false

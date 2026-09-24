@@ -127,9 +127,14 @@
 导出的 schema 与 2.6.1 那份逐字节相同，所以老用户的数据文件仍被认作同一版本~~ ✅
 → ~~城市/模板/天气三个仓库**实现**下沉 commonMain（BuildConfig 默认凭证改构造参数）~~ ✅
 → ~~CityViewModel + CityScreen 进 commonMain（至此三个页面本体重叠完成）~~ ✅
-→ 剩余：**SettingsRepository 的 DataStore 实现**（要抽一层偏好存储，iOS 走 NSUserDefaults）、
-**iOS 入口**（`ComposeUIViewController` + Xcode 工程骨架 + iOS 侧的 AppDependencies 实现）、
-**通知抽象与 iOS 本地通知**（预定通知天然跨重启，见上）。
+→ ~~**偏好存储抽象成 PreferenceBackend**，设置仓库实现进 commonMain
+（Android = DataStore，iOS = NSUserDefaults；键名/类型/删键语义由 commonTest 钉住，
+并做过变异自检）~~ ✅
+→ ~~**iOS 入口**：shared 出 `Shared` 静态 framework、`MainViewController()` 装配四页 +
+手写路由、iOS 侧 CoreLocation 定位与 UserNotifications 本地通知、`ios/App/` 工程骨架~~ ✅
+→ 剩余（都要 macOS/真机才能推进，本机 Windows 无从验证）：
+**在 Mac 上第一次跑起来**（Swift 壳与工程设置大概要调）、
+**iOS 真机走查四页**、以及下面「跑 iOS」一节列出的那几条已知差异。
 
 跨端坑记录（都是本地 Android 编译看不见、只有 iOS 编译才报的）：
 `LocalConfiguration` 是 androidx 但 Compose Multiplatform 没有；`Math.PI` 不需要 import
@@ -142,6 +147,36 @@ Coil3 不自带网络栈，不显式挂 fetcher 就是静默空白；Room 的 na
 
 > 想在 macOS 上直接跑：`cd ios-probe && ../gradlew compileKotlinIosArm64`。
 > 不带参数即用最保守的 2.1.0 + 1.8.2；`-PkotlinVersion=` / `-PcomposeVersion=` 可覆盖。
+
+### 跑 iOS（需要 macOS + Xcode）
+
+Kotlin 侧已经是完整的跨端实现：四个页面、四个 ViewModel、引擎、网络、Room 持久层、
+偏好存储，以及 iOS 的平台能力（CoreLocation 定位、UserNotifications 本地通知）。
+入口是 `shared/src/iosMain/.../MainViewController.kt`，Swift 只需要把它当 rootViewController。
+
+```bash
+brew install xcodegen
+cd ios/App && xcodegen generate && open Jianyi.xcodeproj     # 然后 ⌘R
+```
+
+不想装 xcodegen 的话，在 Xcode 里新建一个 iOS App 工程，照 `ios/App/project.yml`
+那三处配一遍即可：① `FRAMEWORK_SEARCH_PATHS` 指到
+`shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)`；
+② `OTHER_LDFLAGS` 加 `-framework Shared`；
+③ 编译**前**跑一个 Run Script：`../../gradlew :shared:embedAndSignAppleFramework`。
+`Info.plist` 直接抄 `ios/App/Info.plist` —— 里面 `NSLocationWhenInUseUsageDescription`
+是不能省的，缺了它定位授权框根本不弹、定位静默失败。
+
+**必须说清的现状**：开发机是 Windows，Kotlin/Native 不能交叉编译 iOS，所以
+- `:shared` 的 iosArm64 / iosSimulatorArm64 **编译**由 CI 每次推分支验证（这是真验证过的部分）；
+- `ios/App/` 下的 Swift 与工程描述**一次都没编译过**，`IosCapabilities.kt` 里的
+  CoreLocation / UserNotifications 调用也只到"编译器认了"这一层，没跑过设备。
+  第一次在真机上跑大概率还要调，别当成已完成品。
+- iOS 上没有内置的天气 API 凭证（Android 那边打进包里的演示 key 不适用于别人），
+  首次启动要在设置页填自己的 apihz id/key。
+- 每日推送与极端天气预警走本地通知：预定通知天然跨重启，不需要 Android 那套
+  WorkManager + 开机广播；但**极端天气"随时推"做不到 Android 那种强度**，
+  那需要 APNs 与后端，本仓库没有。
 
 
 ## 快速开始
