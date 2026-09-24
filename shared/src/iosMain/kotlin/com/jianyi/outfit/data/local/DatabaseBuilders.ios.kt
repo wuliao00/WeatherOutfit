@@ -2,6 +2,7 @@ package com.jianyi.outfit.data.local
 
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
+import kotlinx.cinterop.ExperimentalForeignApi
 import platform.Foundation.NSDocumentDirectory
 import platform.Foundation.NSFileManager
 import platform.Foundation.NSUserDomainMask
@@ -30,7 +31,14 @@ fun buildWeatherCacheDatabase(): WeatherCacheDatabase =
         .setDriver(BundledSQLiteDriver())
         .build()
 
-/** 沙盒 Documents 目录 + 文件名 */
+/**
+ * 沙盒 Documents 目录 + 文件名。
+ *
+ * `error = null` 那个参数是 `CPointer<ObjCObjectVar<NSError?>>?`，属于 C 互操作面，
+ * Kotlin 2.x 要求显式 @OptIn(ExperimentalForeignApi) —— 本机是 Windows，iOS target
+ * 直接不参与编译，这个错只能由 CI 的 mac job 报出来（第一次推就报了）。
+ */
+@OptIn(ExperimentalForeignApi::class)
 private fun databaseFile(name: String): String {
     val url = NSFileManager.defaultManager.URLForDirectory(
         directory = NSDocumentDirectory,
