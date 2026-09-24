@@ -136,6 +136,11 @@
 **在 Mac 上第一次跑起来**（Swift 壳与工程设置大概要调）、
 **iOS 真机走查四页**、以及下面「跑 iOS」一节列出的那几条已知差异。
 
+同一天补上的关键一环：**CI 现在会在 iOS 模拟器上真跑共享层测试**
+（`:shared:iosSimulatorArm64Test`，Room / 偏好 / 编解码 / 日期 / 坐标 key，37 条）。
+在此之前 iOS 侧的全部结论都只是"编译通过"—— 而它第一次真跑就抓出 Room 打不开库
+（`URLForDirectory(create = false)`），证明这一档验证不是可选项。
+
 跨端坑记录（都是本地 Android 编译看不见、只有 iOS 编译才报的）：
 `LocalConfiguration` 是 androidx 但 Compose Multiplatform 没有；`Math.PI` 不需要 import
 所以「没有 java. 前缀」不代表不是 JVM 的；`collectAsStateWithLifecycle` 当前版本无 iOS 产物；
@@ -167,11 +172,18 @@ cd ios/App && xcodegen generate && open Jianyi.xcodeproj     # 然后 ⌘R
 `Info.plist` 直接抄 `ios/App/Info.plist` —— 里面 `NSLocationWhenInUseUsageDescription`
 是不能省的，缺了它定位授权框根本不弹、定位静默失败。
 
-**必须说清的现状**：开发机是 Windows，Kotlin/Native 不能交叉编译 iOS，所以
-- `:shared` 的 iosArm64 / iosSimulatorArm64 **编译**由 CI 每次推分支验证（这是真验证过的部分）；
-- `ios/App/` 下的 Swift 与工程描述**一次都没编译过**，`IosCapabilities.kt` 里的
-  CoreLocation / UserNotifications 调用也只到"编译器认了"这一层，没跑过设备。
-  第一次在真机上跑大概率还要调，别当成已完成品。
+**必须说清的现状**：开发机是 Windows，Kotlin/Native 不能交叉编译 iOS，所以验证分三档：
+
+- **已经在 iOS 上真跑过的**：CI 的 mac job 除了编译，还会在 **iOS 模拟器上执行共享层测试**
+  （`:shared:iosSimulatorArm64Test`，37 条用例）—— Room 开库与增删查、`@Transaction`
+  切城市、天气缓存编解码、偏好的 NSUserDefaults 往返、坐标 key 格式化、日期算术对齐、
+  玻璃材质红线。这一档是**运行证据**，不是"编译器没意见"。
+  它已经抓到过一次真 bug：`URLForDirectory(create = false)` 让 Room 打不开库，
+  而那时 iOS 的编译与链接全绿。
+- **只到"编译通过"的**：`IosCapabilities.kt` 里的 CoreLocation 与 UserNotifications
+  （授权弹窗、一次性定位、预定通知）—— 模拟器测试环境里这些要走系统 UI，没纳入自动执行。
+- **一次都没跑过的**：`ios/App/` 下的 Swift 与工程描述、以及四页在 iOS 上的**实际渲染**。
+  本机没有 macOS/Xcode，CI 也只编库不建 IPA。第一次在真机上跑大概率还要调，别当成已完成品。
 - iOS 上没有内置的天气 API 凭证（Android 那边打进包里的演示 key 不适用于别人），
   首次启动要在设置页填自己的 apihz id/key。
 - 每日推送与极端天气预警走本地通知：预定通知天然跨重启，不需要 Android 那套
