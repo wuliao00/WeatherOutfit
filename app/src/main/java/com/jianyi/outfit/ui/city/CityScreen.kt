@@ -1,9 +1,5 @@
 package com.jianyi.outfit.ui.city
 
-import android.Manifest
-import android.content.pm.PackageManager
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -59,12 +55,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.jianyi.outfit.data.LocalAppDependencies
 import com.jianyi.outfit.data.local.entity.CityEntity
 import com.jianyi.outfit.di.AppViewModelProvider
 import com.jianyi.outfit.ui.components.EmptyHint
@@ -86,16 +81,10 @@ fun CityScreen(
     viewModel: CityViewModel = viewModel(factory = AppViewModelProvider.Factory)
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
+    val deps = LocalAppDependencies.current
     val scenery = LocalScenery.current
     val dark = scenery.dark || isSystemInDarkTheme()
     val snackbarHostState = remember { SnackbarHostState() }
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { grants ->
-        if (grants.values.any { it }) viewModel.locateByGps() else viewModel.onLocationPermissionDenied()
-    }
 
     LaunchedEffect(state.finished) { if (state.finished) onBack() }
     LaunchedEffect(state.error) {
@@ -105,18 +94,10 @@ fun CityScreen(
         }
     }
 
+    // GPS 定位：已授权就直接用，未授权才弹窗，全部逻辑在能力接口里
     fun requestGps() {
-        val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
-        val coarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION)
-        if (fine == PackageManager.PERMISSION_GRANTED || coarse == PackageManager.PERMISSION_GRANTED) {
-            viewModel.locateByGps()
-        } else {
-            permissionLauncher.launch(
-                arrayOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION
-                )
-            )
+        deps.locationProvider.requestPermission { granted ->
+            if (granted) viewModel.locateByGps() else viewModel.onLocationPermissionDenied()
         }
     }
 

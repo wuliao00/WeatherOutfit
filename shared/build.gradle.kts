@@ -60,6 +60,10 @@ kotlin {
             // 液态玻璃。HazeState 出现在 GlassHost 的公开构造参数里，必须 api()
             api(libs.haze.core)
 
+            // Coil3：页面里的 AsyncImage（天气图标）。Android 引擎在 app 侧声明，
+            // 这里只要 compose 组件本身（它有 iosarm64 产物）
+            api(libs.coil3.compose)
+
             // 仓库接口的签名里有 Flow / suspend，coroutines 必须对 app 可见
             api(libs.kotlinx.coroutines.core)
 

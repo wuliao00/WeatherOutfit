@@ -4,8 +4,9 @@ import android.content.Context
 import com.jianyi.outfit.data.AppDependencies
 import com.jianyi.outfit.data.CitySelection
 import com.jianyi.outfit.data.ExtremeAlerter
-import com.jianyi.outfit.data.GeoPoint
+import com.jianyi.outfit.data.HighFrameRateApi
 import com.jianyi.outfit.data.LocationProvider
+import com.jianyi.outfit.data.NotificationGate
 import com.jianyi.outfit.data.PushScheduler
 import com.jianyi.outfit.data.local.AppDatabase
 import com.jianyi.outfit.data.local.WeatherCacheDatabase
@@ -19,6 +20,10 @@ import com.jianyi.outfit.data.repository.WeatherRepository
 import com.jianyi.outfit.data.repository.WeatherRepositoryImpl
 import com.jianyi.outfit.notification.DailyPushScheduler
 import com.jianyi.outfit.notification.Notifier
+import com.jianyi.outfit.util.ActivityHolder
+import com.jianyi.outfit.util.AndroidHighFrameRate
+import com.jianyi.outfit.util.AndroidLocationProvider
+import com.jianyi.outfit.util.AndroidNotificationGate
 import com.jianyi.outfit.util.LocationUtil
 import com.jianyi.outfit.ui.scenery.SceneryController
 import kotlinx.coroutines.flow.Flow
@@ -69,17 +74,23 @@ class AppContainer(context: Context) : AppDependencies {
     /** 定位工具 */
     val locationUtil: LocationUtil = LocationUtil(context.applicationContext)
 
-    /**
-     * 定位能力（shared 的 ViewModel 只认这个接口，不认识 android.location.Location）。
-     * 声明在 locationUtil 之后：属性初始化按书写顺序执行，提前引用会拿到未初始化的值。
-     */
-    override val locationProvider: LocationProvider = object : LocationProvider {
-        override fun hasPermission(): Boolean =
-            LocationUtil.hasLocationPermission(context.applicationContext)
+    /** 当前可弹窗的 Activity；MainActivity 在 onCreate 挂、onDestroy 摘 */
+    val activities: ActivityHolder = ActivityHolder()
 
-        override suspend fun lastKnown(): GeoPoint? =
-            locationUtil.lastKnownLocation()?.let { GeoPoint(it.latitude, it.longitude) }
-    }
+    /**
+     * 定位能力（shared 的 ViewModel 与页面只认这个接口）。
+     * 声明在 locationUtil / activities 之后：属性初始化按书写顺序执行，
+     * 提前引用会拿到尚未赋值的对象。
+     */
+    override val locationProvider: LocationProvider =
+        AndroidLocationProvider(context.applicationContext, locationUtil, activities)
+
+    /** 通知授权（Android 13 起才是运行时权限） */
+    override val notificationGate: NotificationGate =
+        AndroidNotificationGate(context.applicationContext, activities)
+
+    /** 高帧率状态视图：转发给 FrameRate，设置页因此不必 import Android-only 工具 */
+    override val highFrameRate: HighFrameRateApi = AndroidHighFrameRate
 
     /** 极端天气预警通知：包装 NotificationCompat 的静态工具 */
     override val extremeAlerter: ExtremeAlerter = object : ExtremeAlerter {

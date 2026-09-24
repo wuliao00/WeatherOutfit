@@ -1,8 +1,5 @@
 package com.jianyi.outfit.ui.home
 
-import android.Manifest
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
@@ -69,7 +66,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -96,9 +92,9 @@ import com.jianyi.outfit.ui.scenery.SceneryPickerSheet
 import com.jianyi.outfit.ui.theme.HighTempOrange
 import com.jianyi.outfit.ui.theme.LocalScenery
 import com.jianyi.outfit.ui.theme.LowTempBlue
+import com.jianyi.outfit.data.LocalAppDependencies
 import com.jianyi.outfit.ui.theme.MotionSpecs
 import com.jianyi.outfit.util.Formatters
-import com.jianyi.outfit.util.LocationUtil
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
@@ -121,28 +117,20 @@ fun HomeScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val controller = LocalSceneryController.current
     val snackbarHostState = remember { SnackbarHostState() }
-    val context = LocalContext.current
+    val deps = LocalAppDependencies.current
     val scroll = rememberScrollState()
     val density = LocalDensity.current
     val collapseRangePx = with(density) { 116.dp.toPx() }
     val collapse: MutableFloatState = remember { mutableFloatStateOf(0f) }
     var showPicker by rememberSaveable { mutableStateOf(false) }
 
-    // 首页「使用精确定位」的权限申请（IP 降级提示条触发）
-    val gpsPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { grants ->
-        if (grants.values.any { it }) viewModel.locateByGps() else viewModel.onLocationPermissionDenied()
-    }
-
+    // 首页「使用精确定位」的权限申请（IP 降级提示条触发）。
+    // 「已授予就直接定位、否则弹窗、按结果分支」三步全在能力接口里，
+    // 页面不碰 Manifest、也不碰 activity-result API —— 这样它才能进 commonMain。
     fun requestGpsFromHome() {
-        if (LocationUtil.hasLocationPermission(context)) viewModel.locateByGps()
-        else gpsPermissionLauncher.launch(
-            arrayOf(
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            )
-        )
+        deps.locationProvider.requestPermission { granted ->
+            if (granted) viewModel.locateByGps() else viewModel.onLocationPermissionDenied()
+        }
     }
 
     LaunchedEffect(state.message) {

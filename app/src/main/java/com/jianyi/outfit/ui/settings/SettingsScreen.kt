@@ -1,7 +1,5 @@
 package com.jianyi.outfit.ui.settings
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.animation.core.Animatable
@@ -52,13 +50,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.jianyi.outfit.data.HighFrameRateApi
+import com.jianyi.outfit.data.LocalAppDependencies
 import com.jianyi.outfit.data.model.Gender
 import com.jianyi.outfit.data.model.GlassQuality
 import com.jianyi.outfit.data.model.SceneryMode
@@ -76,14 +74,10 @@ import com.jianyi.outfit.ui.glass.GlassSurface
 import com.jianyi.outfit.ui.glass.glassMaterial
 import com.jianyi.outfit.ui.glass.supportsRealtimeBlur
 import com.jianyi.outfit.ui.theme.MotionSpecs
-import com.jianyi.outfit.util.FrameRate
 import com.jianyi.outfit.ui.scenery.LocalSceneryController
 import com.jianyi.outfit.ui.scenery.SceneryGrid
 import com.jianyi.outfit.ui.scenery.SceneryStrip
 import com.jianyi.outfit.ui.theme.LocalScenery
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
 import kotlin.math.roundToInt
 
 /** 可选的每日推送时刻（点整），与推送时间选择器一一对应 */
@@ -102,7 +96,7 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = viewModel(factory = AppViewModelProvider.Factory)
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
+    val deps = LocalAppDependencies.current
     val controller = LocalSceneryController.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scenery = LocalScenery.current
@@ -115,20 +109,17 @@ fun SettingsScreen(
         }
     }
 
-    val notificationPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted -> viewModel.setDailyPush(granted) }
-
+    /**
+     * 每日推送开关：开的时候才要通知权限。
+     * 「Android 13 以下无需申请、以上没授予就弹窗、授予后才真正打开」
+     * 全部收在 notificationGate 里，页面只写一条 requestPermission。
+     */
     fun onDailyPushToggle(enabled: Boolean) {
-        when {
-            !enabled -> viewModel.setDailyPush(false)
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                ContextCompat.checkSelfPermission(
-                    context, Manifest.permission.POST_NOTIFICATIONS
-                ) != PackageManager.PERMISSION_GRANTED ->
-                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            else -> viewModel.setDailyPush(true)
+        if (!enabled) {
+            viewModel.setDailyPush(false)
+            return
         }
+        deps.notificationGate.requestPermission { granted -> viewModel.setDailyPush(granted) }
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -234,7 +225,7 @@ fun SettingsScreen(
                     title = "高帧率渲染",
                     // 申请通道要 Android 15+ 才有；旧系统上这个开关确实无效，
                     // 与其默默失效，不如直接说明，省得用户开了又疑惑为什么没变化
-                    subtitle = frameRateSubtitle(state.prefs.highFrameRateEnabled),
+                    subtitle = frameRateSubtitle(deps.highFrameRate, state.prefs.highFrameRateEnabled),
                     checked = state.prefs.highFrameRateEnabled,
                     onCheckedChange = viewModel::setHighFrameRate,
                     dark = dark
@@ -489,22 +480,22 @@ private fun Segments(
  * 申请发生在 MainActivity 的 SideEffect 里，现算会把"以为会发的"当成"已经发的"。
  */
 @Composable
-private fun frameRateSubtitle(enabled: Boolean): String {
-    if (!FrameRate.isSupported) {
+private fun frameRateSubtitle(api: HighFrameRateApi, enabled: Boolean): String {
+    if (!api.isSupported) {
         return "本机系统未提供帧率申请通道（需 Android 12+），此项暂不生效"
     }
     if (!enabled) return "已关闭：把刷新率选择权交回系统（更省电）"
-    val exact = FrameRate.requestedHz.roundToInt()
-    val locked = FrameRate.lockedHz.roundToInt()
+    val exact = api.requestedHz.roundToInt()
+    val locked = api.lockedHz.roundToInt()
     return when {
-        FrameRate.exactChannelAccepted && FrameRate.lockedModeId != 0 ->
+        api.exactChannelAccepted && api.lockedModeId != 0 ->
             "已锁档并向系统申请 ${exact}Hz（面板顶档）；最终档位仍由系统裁决，" +
                 "省电模式与机身温度会把它压回去"
 
-        FrameRate.lockedModeId != 0 ->
+        api.lockedModeId != 0 ->
             "已锁定 ${locked}Hz 面板档位；本机精确帧率通道未开放，锁档是唯一生效的那条"
 
-        FrameRate.usedCategoryFallback ->
+        api.usedCategoryFallback ->
             "已申请高帧率类别档（本机读不到面板档位，具体 Hz 交由系统翻译）"
 
         else ->

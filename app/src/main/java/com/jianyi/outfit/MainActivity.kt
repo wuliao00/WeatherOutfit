@@ -34,6 +34,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        // 权限弹窗需要 Activity；shared 侧的能力接口通过容器上的 holder 取用
+        (application as WeatherOutfitApp).container.activities.attach(this)
+
         setContent {
             val app = application as WeatherOutfitApp
             val controller = app.container.sceneryController
@@ -54,11 +57,16 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            RootScreen(controller = controller, prefs = prefs) {
+            RootScreen(deps = app.container, controller = controller, prefs = prefs) {
                 AppNavHost()
                 DisclaimerLayer(app)
             }
         }
+    }
+
+    override fun onDestroy() {
+        (application as WeatherOutfitApp).container.activities.detach(this)
+        super.onDestroy()
     }
 }
 
