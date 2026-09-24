@@ -53,8 +53,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.runtime.collectAsState
 import com.jianyi.outfit.data.HighFrameRateApi
 import com.jianyi.outfit.data.LocalAppDependencies
 import com.jianyi.outfit.data.model.Gender
@@ -65,7 +64,6 @@ import com.jianyi.outfit.data.model.TempUnit
 import com.jianyi.outfit.data.model.ToleranceLevel
 import com.jianyi.outfit.data.model.WindUnit
 import com.jianyi.outfit.data.repository.ApiCredentials
-import com.jianyi.outfit.di.AppViewModelProvider
 import com.jianyi.outfit.ui.glass.GlassEmphasis
 import com.jianyi.outfit.ui.glass.GlassIconButton
 import com.jianyi.outfit.ui.glass.GlassRole
@@ -93,9 +91,9 @@ private val PUSH_HOUR_OPTIONS = listOf(6, 7, 8, 9)
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
-    viewModel: SettingsViewModel = viewModel(factory = AppViewModelProvider.Factory)
+    viewModel: SettingsViewModel
 ) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val state by viewModel.uiState.collectAsState()
     val deps = LocalAppDependencies.current
     val controller = LocalSceneryController.current
     val snackbarHostState = remember { SnackbarHostState() }

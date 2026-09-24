@@ -72,12 +72,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.runtime.collectAsState
 import coil3.compose.AsyncImage
 import com.jianyi.outfit.data.model.TempUnit
 import com.jianyi.outfit.data.model.WeatherNow
-import com.jianyi.outfit.di.AppViewModelProvider
 import com.jianyi.outfit.ui.components.ErrorPanel
 import com.jianyi.outfit.ui.components.LoadingPanel
 import com.jianyi.outfit.ui.glass.GlassEmphasis
@@ -112,9 +110,9 @@ fun HomeScreen(
     onNavigateToDetail: (String) -> Unit,
     onNavigateToCity: () -> Unit,
     onNavigateToSettings: () -> Unit,
-    viewModel: HomeViewModel = viewModel(factory = AppViewModelProvider.Factory)
+    viewModel: HomeViewModel
 ) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val state by viewModel.uiState.collectAsState()
     val controller = LocalSceneryController.current
     val snackbarHostState = remember { SnackbarHostState() }
     val deps = LocalAppDependencies.current

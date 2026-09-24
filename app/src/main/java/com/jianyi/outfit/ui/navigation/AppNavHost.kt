@@ -71,6 +71,7 @@ fun AppNavHost() {
     ) {
         composable(Routes.HOME) {
             HomeScreen(
+                viewModel = viewModel(factory = AppViewModelProvider.Factory),
                 onNavigateToDetail = { cacheKey ->
                     navController.navigate(detailRoute(cacheKey))
                 },
@@ -96,7 +97,10 @@ fun AppNavHost() {
             CityScreen(onBack = { navController.popBackStack() })
         }
         composable(Routes.SETTINGS) {
-            SettingsScreen(onBack = { navController.popBackStack() })
+            SettingsScreen(
+                onBack = { navController.popBackStack() },
+                viewModel = viewModel(factory = AppViewModelProvider.Factory)
+            )
         }
     }
 }
