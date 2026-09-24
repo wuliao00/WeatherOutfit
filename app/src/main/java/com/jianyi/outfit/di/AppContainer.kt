@@ -68,8 +68,8 @@ class AppContainer(context: Context) : AppDependencies {
         defaultApiKey = BuildConfig.WEATHER_API_KEY
     )
 
-    /** 城市仓库 */
-    val cityRepository: CityRepository = CityRepositoryImpl(database.cityDao())
+    /** 城市仓库（历史城市与当前城市切换） */
+    override val cityRepository: CityRepository = CityRepositoryImpl(database.cityDao())
 
     /** 穿搭模板仓库 */
     override val templateRepository: OutfitTemplateRepository =

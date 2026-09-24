@@ -46,6 +46,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,11 +58,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.jianyi.outfit.data.LocalAppDependencies
 import com.jianyi.outfit.data.local.entity.CityEntity
-import com.jianyi.outfit.di.AppViewModelProvider
 import com.jianyi.outfit.ui.components.EmptyHint
 import com.jianyi.outfit.ui.glass.GlassEmphasis
 import com.jianyi.outfit.ui.glass.GlassIconButton
@@ -73,14 +71,19 @@ import com.jianyi.outfit.ui.theme.LocalScenery
 
 /**
  * 城市管理页：省份 + 城市搜索、GPS 定位、历史城市快速切换（左滑删除）。
+ *
+ * viewModel 由调用方注入（app 侧的 NavHost 用 AppViewModelProvider.Factory 拿）。
+ * 页面自己不再 viewModel()：那个组合期工厂在 CMP 里没有对应实现，
+ * 而且"页面从哪拿 VM"本来就该是导航层的事。
+ * 状态收集用 collectAsState()：collectAsStateWithLifecycle 没有 iOS 产物。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CityScreen(
     onBack: () -> Unit,
-    viewModel: CityViewModel = viewModel(factory = AppViewModelProvider.Factory)
+    viewModel: CityViewModel
 ) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val state by viewModel.uiState.collectAsState()
     val deps = LocalAppDependencies.current
     val scenery = LocalScenery.current
     val dark = scenery.dark || isSystemInDarkTheme()

@@ -2,7 +2,7 @@ package com.jianyi.outfit.ui.city
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.jianyi.outfit.WeatherOutfitApp
+import com.jianyi.outfit.data.AppDependencies
 import com.jianyi.outfit.data.local.entity.CityEntity
 import com.jianyi.outfit.data.repository.RateLimitedException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,11 +28,12 @@ data class CityUiState(
  * - 手动搜索（省 + 市/区）
  * - GPS 自动定位（失败自动回退提示改用搜索/IP 定位）
  * - 历史城市快速切换与删除
+ *
+ * 依赖走 [AppDependencies] 而不是 Application：与首页/设置页同一套接缝，
+ * 定位也只用 locationProvider 抽象（原来直接拿 Android 的 LocationUtil，
+ * 返回的经纬度字段名与 GeoPoint 一致，所以调用处几乎没变）。
  */
-class CityViewModel(private val app: WeatherOutfitApp) : ViewModel() {
-
-    private val container = app.container
-
+class CityViewModel(private val deps: AppDependencies) : ViewModel() {
     private val _uiState = MutableStateFlow(CityUiState())
     val uiState: StateFlow<CityUiState> = _uiState.asStateFlow()
 
@@ -49,12 +50,12 @@ class CityViewModel(private val app: WeatherOutfitApp) : ViewModel() {
 
     init {
         viewModelScope.launch {
-            container.cityRepository.allCities.collect { list ->
+            deps.cityRepository.allCities.collect { list ->
                 _uiState.update { it.copy(savedCities = list) }
             }
         }
         viewModelScope.launch {
-            container.cityRepository.currentCity.collect { city ->
+            deps.cityRepository.currentCity.collect { city ->
                 _uiState.update { it.copy(currentCity = city) }
             }
         }
@@ -79,9 +80,9 @@ class CityViewModel(private val app: WeatherOutfitApp) : ViewModel() {
         }
         viewModelScope.launch {
             _uiState.update { it.copy(searching = true, error = null) }
-            container.weatherRepository.byAddress(current.province, city, force = true).fold(
+            deps.weatherRepository.byAddress(current.province, city, force = true).fold(
                 onSuccess = { weather ->
-                    container.cityRepository.switchTo(
+                    deps.cityRepository.switchTo(
                         province = weather.province.ifBlank { current.province },
                         city = weather.city,
                         source = "search"
@@ -102,7 +103,7 @@ class CityViewModel(private val app: WeatherOutfitApp) : ViewModel() {
         if (_uiState.value.locating) return
         viewModelScope.launch {
             _uiState.update { it.copy(locating = true, error = null) }
-            val location = container.locationUtil.lastKnownLocation()
+            val location = deps.locationProvider.lastKnown()
             if (location == null) {
                 _uiState.update {
                     it.copy(
@@ -112,10 +113,10 @@ class CityViewModel(private val app: WeatherOutfitApp) : ViewModel() {
                 }
                 return@launch
             }
-            container.weatherRepository.byLatLon(location.latitude, location.longitude).fold(
+            deps.weatherRepository.byLatLon(location.latitude, location.longitude).fold(
                 onSuccess = { weather ->
                     if (weather.province.isNotBlank()) {
-                        container.cityRepository.switchTo(
+                        deps.cityRepository.switchTo(
                             province = weather.province,
                             city = weather.city,
                             source = "gps"
@@ -123,7 +124,7 @@ class CityViewModel(private val app: WeatherOutfitApp) : ViewModel() {
                     } else {
                         // 经纬度数据源不含省份，无法持久化为地址查询；
                         // 清除手选城市，让首页走「GPS 优先」自动定位链
-                        container.cityRepository.clearCurrentSelection()
+                        deps.cityRepository.clearCurrentSelection()
                     }
                     _uiState.update { it.copy(locating = false, finished = true) }
                 },
@@ -155,14 +156,14 @@ class CityViewModel(private val app: WeatherOutfitApp) : ViewModel() {
     /** 点击历史城市：切换为当前城市 */
     fun selectCity(city: CityEntity) {
         viewModelScope.launch {
-            container.cityRepository.switchTo(city.province, city.city, city.source)
+            deps.cityRepository.switchTo(city.province, city.city, city.source)
             _uiState.update { it.copy(finished = true) }
         }
     }
 
     /** 左滑删除历史城市 */
     fun deleteCity(city: CityEntity) {
-        viewModelScope.launch { container.cityRepository.delete(city) }
+        viewModelScope.launch { deps.cityRepository.delete(city) }
     }
 
     fun consumeError() {

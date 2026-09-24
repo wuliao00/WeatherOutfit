@@ -94,7 +94,10 @@ fun AppNavHost() {
             )
         }
         composable(Routes.CITY) {
-            CityScreen(onBack = { navController.popBackStack() })
+            CityScreen(
+                onBack = { navController.popBackStack() },
+                viewModel = viewModel(factory = AppViewModelProvider.Factory)
+            )
         }
         composable(Routes.SETTINGS) {
             SettingsScreen(

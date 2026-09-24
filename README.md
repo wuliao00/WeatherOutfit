@@ -102,6 +102,9 @@
 
 - ✅ Haze **1.6.10 就有 iosarm64**（core 与 materials 都有），玻璃层不用换库、不用升版本
 - ✅ Room 有 iOS 产物，自 2.7.0-alpha01 起（现 2.8.5）—— **只需升版本，不用换 SQLDelight**
+  （已做：钉 **2.7.2**。挑版本靠读制品而不是查文档 —— `room-runtime-iosarm64/2.7.2` 的
+  klib manifest 是 `abi_version=1.201.0`，与我们的 Kotlin 2.1.0 同一条 ABI 线；
+  而 2.8.5 是 `2.2.0`，换它就得先升 Kotlin。`sqlite-bundled` 同理取 2.5.1）
 - ✅ DataStore / Coil3 / JB 的 lifecycle-viewmodel 与 navigation / Ktor / kotlinx-serialization 都有 iosarm64
 - ❌ **WorkManager 没有 iOS 对应物**，这是唯一真正要重新设计的功能
 
@@ -117,13 +120,25 @@
 → ~~液态玻璃 + 跟手动效整层进 commonMain（supportsRealtimeBlur / 系统动画缩放 expect/actual 化，材质策略测试随迁 commonTest）~~ ✅
 → ~~仓库接口下沉 + 依赖接缝 AppDependencies + 三个 ViewModel（首页/设置/详情）进 commonMain~~ ✅
 → ~~Coil→Coil3 + 无权限依赖的 UI（卡片/组件/风景背景与抽屉/详情页/主题）进 commonMain~~ ✅
-→ 剩余：HomeScreen/CityScreen/SettingsScreen 与导航（依赖 Manifest 权限检查与 navigation-compose）、
-CityViewModel（随 Room 2.7 KMP）、iOS 入口与平台实现、通知抽象与 iOS 本地通知。
+→ ~~权限检查抽象成能力接口（LocationProvider / NotificationGate / HighFrameRateApi）
++ HomeScreen 与 SettingsScreen 进 commonMain~~ ✅
+→ ~~**Room 升 2.7.2 KMP**：Entity / DAO / 两个数据库定义进 commonMain，
+开库动作留平台侧（Android 用 Context、iOS 用 Documents 路径 + 显式 bundled 驱动）；
+导出的 schema 与 2.6.1 那份逐字节相同，所以老用户的数据文件仍被认作同一版本~~ ✅
+→ ~~城市/模板/天气三个仓库**实现**下沉 commonMain（BuildConfig 默认凭证改构造参数）~~ ✅
+→ ~~CityViewModel + CityScreen 进 commonMain（至此三个页面本体重叠完成）~~ ✅
+→ 剩余：**SettingsRepository 的 DataStore 实现**（要抽一层偏好存储，iOS 走 NSUserDefaults）、
+**iOS 入口**（`ComposeUIViewController` + Xcode 工程骨架 + iOS 侧的 AppDependencies 实现）、
+**通知抽象与 iOS 本地通知**（预定通知天然跨重启，见上）。
 
 跨端坑记录（都是本地 Android 编译看不见、只有 iOS 编译才报的）：
 `LocalConfiguration` 是 androidx 但 Compose Multiplatform 没有；`Math.PI` 不需要 import
 所以「没有 java. 前缀」不代表不是 JVM 的；`collectAsStateWithLifecycle` 当前版本无 iOS 产物；
-Coil3 不自带网络栈，不显式挂 fetcher 就是静默空白。
+Coil3 不自带网络栈，不显式挂 fetcher 就是静默空白；Room 的 native
+`RoomDatabase.Builder.build()` 会 `requireNotNull(driver)`，忘了 `setDriver` 是启动即崩；
+调 `NSFileManager.URLForDirectory` 要 `@OptIn(ExperimentalForeignApi::class)`；
+`@Database` 在 KMP 下必须配 `@ConstructedBy` + 一个 `expect object` 构造入口
+（actual 由各 target 的 KSP 生成，但 commonMain 的元数据编译看不到，得压掉那条告警）。
 
 > 想在 macOS 上直接跑：`cd ios-probe && ../gradlew compileKotlinIosArm64`。
 > 不带参数即用最保守的 2.1.0 + 1.8.2；`-PkotlinVersion=` / `-PcomposeVersion=` 可覆盖。
@@ -200,20 +215,13 @@ val DarkPrimary = Color(0xFFA7BCDA)   // 暗黑模式主色（保持足够对比
 ## 项目结构
 
 ```
-app/src/main/java/com/jianyi/outfit/   # 只剩 Android 专属部分
-├── data/
-│   ├── local/           # Room 数据库、DAO、Entity（城市/模板/缓存）
-│   └── repository/      # 四个仓库实现（接口在 shared；天气实现含 DTO→领域模型转换）
-├── ui/                  # 只有还依赖系统权限/导航的四个页面留在这
-│   ├── root/            # 应用根节点：风景 + 玻璃宿主 + 主题装配
-│   ├── home/            # 首页（权限申请 launcher、AsyncImage 图标）
-│   ├── city/            # 城市管理（搜索/GPS/历史城市 + CityViewModel 依赖 Room Entity）
-│   ├── settings/        # 设置页（通知权限按版本分支）
-│   └── navigation/      # 导航图与转场（navigation-compose）
-├── notification/        # 通知渠道、每日推送调度（WorkManager）与开机自启接收器
-├── di/                  # AppContainer（实现 shared 的 AppDependencies）+ ViewModel 工厂
-├── util/                # 帧率申请、定位（FusedLocation）
-└── MainActivity / WeatherOutfitApp     # 入口；App 同时是 Coil3 的 ImageLoader 工厂
+app/src/main/java/com/jianyi/outfit/   # 只剩 Android 专属部分（13 个文件）
+├── data/repository/SettingsRepository.kt  # DataStore 实现（接口与其余三个仓库都在 shared）
+├── ui/navigation/AppNavHost.kt        # 导航图与转场（navigation-compose），负责注入各页 VM
+├── notification/                      # 通知渠道、每日推送（WorkManager）与开机自启接收器
+├── di/                                # AppContainer（实现 AppDependencies）+ ViewModel 工厂
+├── util/                              # 帧率申请、FusedLocation、权限申请（activityResultRegistry）
+└── MainActivity / WeatherOutfitApp    # 入口；App 同时是 Coil3 的 ImageLoader 工厂
 ```
 
 跨平台的 `shared/` 模块（Android 与 iOS 同源，包名与 app 一致所以 app 侧零 import 改动）：
@@ -223,18 +231,21 @@ shared/src/
 ├── commonMain/kotlin/com/jianyi/outfit/
 │   ├── engine/          # 穿搭推荐引擎、生活指数引擎（纯 Kotlin，可单测）
 │   ├── data/model/      # 领域模型
+│   ├── data/local/      # Room Entity / DAO / 两个 @Database（Room 2.7 起是 KMP 库）
 │   ├── data/remote/     # Ktor 客户端、@Serializable DTO、缓存编解码（格式兼容旧 Gson 行）
-│   ├── data/repository/ # 三个仓库接口（实现在 app：Room / DataStore）
+│   ├── data/repository/ # 三个仓库接口 + 城市/模板/天气三份实现（DTO→领域模型也在这）
 │   ├── data/AppDependencies.kt  # ViewModel 的依赖接缝 + 平台能力接口
 │   ├── ui/glass/        # 液态玻璃材质（唯一的模糊源与四条红线）
 │   ├── ui/motion/       # 跟手基础件：按压弹簧、折叠控制器
 │   ├── ui/scenery/      # 风景主题、选景规则、背景层与抽屉（图片用 CMP 资源）
 │   ├── ui/theme/        # 颜色 token、字体形状、主题装配、动效规范
-│   ├── ui/home|detail|settings/  # 三个 ViewModel + 详情页
+│   ├── ui/root/         # 应用根节点：风景 + 玻璃宿主 + 主题 + LocalAppDependencies
+│   ├── ui/home|city|detail|settings/  # 四个页面的 ViewModel 与界面本体
 │   ├── ui/components/   # 通用组件与使用须知弹窗
 │   ├── util/            # Formatters（日期用纯儒略日算术）
 │   └── platform/        # expect/actual：时间/月份/时区、坐标 key、HTTP 引擎
-├── androidMain/ iosMain/  # 各平台 actual（OkHttp/Darwin、RenderEffect 门槛、系统动画开关）
+├── androidMain/         # actual：OkHttp 引擎、RenderEffect 门槛、系统动画开关、Room 开库（Context）
+├── iosMain/             # actual：Darwin 引擎、坐标 key 定宽格式化、Room 开库（Documents + bundled 驱动）
 └── commonTest/          # 缓存格式与玻璃材质的"钉子"测试
 ```
 

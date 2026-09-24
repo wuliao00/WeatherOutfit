@@ -25,7 +25,7 @@ object AppViewModelProvider {
             val handle = createSavedStateHandle()
             OutfitDetailViewModel(app().container, handle.get<String>(DETAIL_ARG_CACHE_KEY).orEmpty())
         }
-        initializer { CityViewModel(app()) }
+        initializer { CityViewModel(app().container) }
         initializer { SettingsViewModel(app().container) }
     }
 

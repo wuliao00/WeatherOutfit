@@ -1,5 +1,6 @@
 package com.jianyi.outfit.data
 
+import com.jianyi.outfit.data.repository.CityRepository
 import com.jianyi.outfit.data.repository.OutfitTemplateRepository
 import com.jianyi.outfit.data.repository.SettingsRepository
 import com.jianyi.outfit.data.repository.WeatherRepository
@@ -13,15 +14,20 @@ import kotlinx.coroutines.flow.Flow
  * Application 类上，ViewModel 就永远出不了 Android。现在 ViewModel 只依赖这个接口，
  * 实现就是 app 的 [com.jianyi.outfit.di.AppContainer]（它本来就持有这些东西）。
  *
- * 刻意不放 cityRepository / locationUtil 的具体类型：
- * CityRepository 的签名泄漏 Room 的 CityEntity（等 Room 2.7 KMP 升级），
- * 所以这里只暴露 HomeViewModel 真正需要的最小视图 [currentCity]；
- * 定位与通知是平台能力，抽象成 [locationProvider] / [extremeAlerter]。
+ * 刻意不放 locationUtil / 通知管理器的具体类型：定位与通知是平台能力，
+ * 抽象成 [locationProvider] / [extremeAlerter] 才能两端各写一份实现。
+ *
+ * cityRepository 以前也不能放——它的签名带 Room 的 CityEntity，而 Room 只有
+ * Android 产物。Room 进 KMP 之后这个障碍没了，城市页因此能整体下沉；
+ * [currentCity] 仍然保留，首页只要省市两个字段，不该为了它去感知表结构。
  */
 interface AppDependencies {
     val weatherRepository: WeatherRepository
     val settingsRepository: SettingsRepository
     val templateRepository: OutfitTemplateRepository
+
+    /** 历史城市与当前城市切换（城市页的全部数据来源） */
+    val cityRepository: CityRepository
 
     /** 每日推送调度能力：Android = WorkManager 周期任务，iOS = 预定本地通知 */
     val pushScheduler: PushScheduler
