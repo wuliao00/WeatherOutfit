@@ -88,6 +88,15 @@ def scan(text: str):
     stack = []
 
     for ln, line in enumerate(text.splitlines(), 1):
+        # 游离的注释续行：编辑时把新的 ` * ...` 段落接在已经 `*/` 收尾的注释块后面，
+        # Kotlin 会报一整串 "Expecting a top level declaration"。这类错在 iosMain 文件上
+        # 本机根本编不到（Windows 上 iOS target 被禁用，编译被跳过），只能靠这里挡。
+        # 唯一合法的行首 `*` 是 `val a = b\n * c` 这种二元运算符续行 —— 本仓库零处使用，
+        # 所以规则按"行首是 `*` 且不在块注释内"直接判，误报时再收。
+        if not in_block and line.lstrip().startswith("*"):
+            yield ln, "orphan '*' line outside a block comment - the KDoc above already " \
+                      "closed with '*/'; Kotlin reports 'Expecting a top level declaration'"
+            continue
         # Initialised declarations only: `val x = ...` inside an argument list is a
         # syntax error ("Expecting an expression"), while `val x: T` with no `=` is a
         # perfectly legal primary-constructor property -- that distinction is what keeps

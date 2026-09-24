@@ -263,12 +263,11 @@ class IosExtremeAlerter : ExtremeAlerter {
 /**
  * 组一条通知请求；两个发通知的类共用。
  *
- * title / body / sound 不能用 `content.title = ...` 直接赋：
- * UNMutableNotificationContent 把父类（UNNotificationContent 协议）里 readonly 的
- * 这三个属性重新声明成了 readwrite，而 **cinterop 沿用父类的 readonly 声明**，
- * 于是 Kotlin 侧看到的是 val，赋值报 "'val' cannot be reassigned"。
- * 走 KVC（NSObject 的 -setValue:forKey:）绕开，属性名与头文件一致。
- */
+ * title / body / sound **不能直接属性赋值**：UNMutableNotificationContent 把父类
+ * （UNNotificationContent 协议）里 readonly 的这三个属性重声明成了 readwrite，
+ * 而 cinterop 沿用父类视图，Kotlin 侧看到的就是 val，赋值报
+ * "'val' cannot be reassigned"。
+ *
  * 绕法不是猜的：一次性探针文件里把六种写法各编一遍推给 CI，一次问出只有两种成立 ——
  * ① ObjC setter 函数 `setTitle(...)`；② **把静态类型收成 NSObject 再走 KVC**
  * （同一个 `setValue(_:forKey:)` 在 UNMutableNotificationContent 视图下解析不到成员，
