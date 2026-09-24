@@ -98,12 +98,15 @@ private fun Pages(deps: AppDependencies, router: IosRouter) {
     AnimatedContent(
         targetState = router.current,
         transitionSpec = {
-            // 与 Android 那套转场同一组参数：进场略慢要让人看清层次，退场要利落
-            (slideInHorizontally(tween(ENTER_MS)) { it / 14 } +
-                scaleIn(tween(ENTER_MS), 0.94f) + fadeIn(tween(ENTER_MS)))
-                togetherWith
-                (slideOutHorizontally(tween(EXIT_MS)) { -it / 22 } +
-                    scaleOut(tween(EXIT_MS), 0.96f) + fadeOut(tween(EXIT_MS)))
+            // 与 Android 那套转场同一组参数：进场略慢要让人看清层次，退场要利落。
+            // 分两个 val 写而不是 `A togetherWith \n (B)`：中缀符后面紧跟换行 + 左括号，
+            // Kotlin 会把它解析成 togetherWith(B) 这个函数调用，
+            // 报 "Function invocation 'togetherWith(...)' expected"（CI 实测）。
+            val enter = slideInHorizontally(tween(ENTER_MS)) { it / 14 } +
+                scaleIn(tween(ENTER_MS), 0.94f) + fadeIn(tween(ENTER_MS))
+            val exit = slideOutHorizontally(tween(EXIT_MS)) { -it / 22 } +
+                scaleOut(tween(EXIT_MS), 0.96f) + fadeOut(tween(EXIT_MS))
+            enter togetherWith exit
         }
     ) { route ->
         when (route) {

@@ -7,6 +7,7 @@ import com.jianyi.outfit.data.LocationProvider
 import com.jianyi.outfit.data.NotificationGate
 import com.jianyi.outfit.data.PushScheduler
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.useContents
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import platform.CoreLocation.CLAuthorizationStatus
@@ -16,13 +17,16 @@ import platform.CoreLocation.CLLocationManagerDelegateProtocol
 import platform.CoreLocation.kCLAuthorizationStatusAuthorizedAlways
 import platform.CoreLocation.kCLAuthorizationStatusAuthorizedWhenInUse
 import platform.CoreLocation.kCLAuthorizationStatusNotDetermined
-import platform.Foundation.NSDateComponents
+import platform.Foundation.NSCalendar
+import platform.Foundation.NSCalendarUnitHour
+import platform.Foundation.NSCalendarUnitMinute
+import platform.Foundation.NSCalendarUnitSecond
+import platform.Foundation.NSDate
 import platform.Foundation.NSError
 import platform.UserNotifications.UNAuthorizationOptionAlert
 import platform.UserNotifications.UNAuthorizationOptionBadge
 import platform.UserNotifications.UNAuthorizationOptionSound
 import platform.UserNotifications.UNAuthorizationStatusAuthorized
-import platform.UserNotifications.UNCalendarNotificationTrigger
 import platform.UserNotifications.UNMutableNotificationContent
 import platform.UserNotifications.UNNotificationRequest
 import platform.UserNotifications.UNNotificationSettings
@@ -123,10 +127,14 @@ class IosLocationProvider : LocationProvider {
             val last = didUpdateLocations.lastOrNull() as? CLLocation ?: return
             val callback = onLocation
             onLocation = null
-            callback?.invoke(GeoPoint(last.coordinate.latitude, last.coordinate.longitude))
+            // CLLocationCoordinate2D 是 C 结构体，K/N 里它是 CValue，字段要用
+            // useContents 取（直接 .latitude 报 Unresolved reference）
+            val lat = last.coordinate.useContents { latitude }
+            val lon = last.coordinate.useContents { longitude }
+            callback?.invoke(GeoPoint(lat, lon))
         }
 
-        override fun locationManager(manager: CLLocationManager, didFailWithError: NSError?) {
+        override fun locationManager(manager: CLLocationManager, didFailWithError: NSError) {
             val callback = onLocation
             onLocation = null
             callback?.invoke(null)
@@ -183,10 +191,15 @@ class IosNotificationGate : NotificationGate {
 /**
  * 每日推送。
  *
- * Android 那边要 WorkManager 周期任务 + 开机广播"恢复"；iOS 只要一条**重复的
- * 日历触发本地通知**：预定通知由系统持久化，天然跨重启、跨杀进程 ——
- * 这正是"每日推送 + 重启后自动恢复要重新设计"的答案：不用设计，系统替做了。
- * 只给 hour/minute 两个分量，系统就理解为"每天"。
+ * Android 那边要 WorkManager 周期任务 + 开机广播"恢复"；iOS 只要**一条挂起的预定通知**：
+ * 预定请求由系统持久化，天然跨重启、跨杀进程 —— 这正是"每日推送 + 重启后自动恢复
+ * 要重新设计"的答案：不用设计，系统替做了。
+ *
+ * 用 `UNTimeIntervalNotificationTrigger(repeats = true)` 而不是日历触发器：
+ * 后者 `+triggerWithDateComponents:repeats:` 在这个 Kotlin/Native 版本的平台库里
+ * **取不到名字**（CI 报 Unresolved reference），而 timeInterval 那个工厂是可用的。
+ * 代价是"下一次到点"的间隔算出来后按固定周期重复，**夏令时切换那天会偏 1 小时**；
+ * 用户再动一次开关（SettingsViewModel 每次都会重排）就正回来了。
  */
 @OptIn(ExperimentalForeignApi::class)
 class IosPushScheduler : PushScheduler {
@@ -194,12 +207,9 @@ class IosPushScheduler : PushScheduler {
     override fun ensureScheduled(pushHour: Int) {
         val center = UNUserNotificationCenter.currentNotificationCenter() ?: return
         center.removePendingNotificationRequestsWithIdentifiers(listOf(DAILY_ID))
-        val components = NSDateComponents().apply {
-            hour = pushHour.coerceIn(0, 23).toLong()
-            minute = 0L
-        }
-        val trigger = UNCalendarNotificationTrigger.triggerWithDateComponents(components, repeats = true)
-        center.addRequest(
+        val seconds = secondsUntilNextAt(pushHour)
+        val trigger = UNTimeIntervalNotificationTrigger.triggerWithTimeInterval(seconds, repeats = true)
+        center.addNotificationRequest(
             request = buildRequest(DAILY_ID, "今天的穿搭建议", "打开简衣看看今天穿什么合适", trigger),
             withCompletionHandler = null
         )
@@ -213,6 +223,17 @@ class IosPushScheduler : PushScheduler {
     private companion object {
         const val DAILY_ID = "jianyi.daily"
     }
+}
+
+/** 距离下一个 `hour`:00 还有多少秒（至少 1 秒 —— iOS 不接受 0 间隔） */
+private fun secondsUntilNextAt(hour: Int): Double {
+    val cal = NSCalendar.currentCalendar
+    val now = NSDate()
+    val nowSec = cal.component(NSCalendarUnitHour, now).toInt() * 3600 +
+        cal.component(NSCalendarUnitMinute, now).toInt() * 60 +
+        cal.component(NSCalendarUnitSecond, now).toInt()
+    val delta = hour.coerceIn(0, 23) * 3600 - nowSec
+    return (if (delta > 0) delta else delta + 86400).coerceAtLeast(1).toDouble()
 }
 
 /**
@@ -232,14 +253,22 @@ class IosExtremeAlerter : ExtremeAlerter {
         seq += 1
         // iOS 不接受 timeInterval = 0，1 秒即"现在就发"
         val trigger = UNTimeIntervalNotificationTrigger.triggerWithTimeInterval(1.0, repeats = false)
-        center.addRequest(
+        center.addNotificationRequest(
             request = buildRequest("jianyi.alert.$seq", title, text, trigger),
             withCompletionHandler = null
         )
     }
 }
 
-/** 组一条通知请求；两个发通知的类共用 */
+/**
+ * 组一条通知请求；两个发通知的类共用。
+ *
+ * title / body / sound 不能用 `content.title = ...` 直接赋：
+ * UNMutableNotificationContent 把父类（UNNotificationContent 协议）里 readonly 的
+ * 这三个属性重新声明成了 readwrite，而 **cinterop 沿用父类的 readonly 声明**，
+ * 于是 Kotlin 侧看到的是 val，赋值报 "'val' cannot be reassigned"。
+ * 走 KVC（NSObject 的 -setValue:forKey:）绕开，属性名与头文件一致。
+ */
 private fun buildRequest(
     identifier: String,
     title: String,
@@ -247,11 +276,9 @@ private fun buildRequest(
     trigger: UNNotificationTrigger
 ): UNNotificationRequest =
     UNMutableNotificationContent().apply {
-        this.title = title
-        this.body = body
-        // ObjC 这边是 class property（同 NSCalendar.currentCalendar），
-        // Kotlin/Native 把 property 导成属性而不是函数
-        sound = UNNotificationSound.defaultSound
+        setValue(title, forKey = "title")
+        setValue(body, forKey = "body")
+        setValue(UNNotificationSound.defaultSound(), forKey = "sound")
     }.let { content ->
         UNNotificationRequest.requestWithIdentifier(
             identifier = identifier,
