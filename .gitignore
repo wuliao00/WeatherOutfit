@@ -13,3 +13,7 @@ build/
 .externalNativeBuild
 .cxx
 local.properties
+
+# Python 辅助脚本的字节码缓存
+__pycache__/
+*.pyc
