@@ -51,6 +51,22 @@ jobs:
       - name: Compile shared for iosArm64 + iosSimulatorArm64
         run: ./gradlew :shared:compileKotlinIosArm64 :shared:compileKotlinIosSimulatorArm64 --no-daemon --stacktrace
 
+      # 编译通过 ≠ 能跑。这一层的失败模式全是运行期的：Room 没挂上驱动、schema 校验不过、
+      # 生成的 Impl 找不到、flow 不推送；偏好的类型标签写错也只是"值悄悄漂移"。
+      # 本机是 Windows，iOS target 压根不参与编译，所以模拟器测试是唯一能拿到
+      # 「iOS 上真跑过」证据的地方 —— 没有这一步，iOS 侧的所有结论都只是"编译器没意见"。
+      - name: Run shared tests on the iOS simulator
+        run: ./gradlew :shared:iosSimulatorArm64Test --no-daemon --stacktrace
+
+      # 失败时把逐用例结果留成制品，否则只能看到 "Compilation finished with errors" 那一行
+      - name: Upload iOS test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-simulator-test-results
+          path: shared/build/test-results/
+          if-no-files-found: ignore
+
   version-matrix:
     name: kotlin ${{ matrix.kotlin }} / compose ${{ matrix.compose }}
     runs-on: macos-latest
