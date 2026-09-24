@@ -1,6 +1,5 @@
 package com.jianyi.outfit.data.repository
 
-import com.jianyi.outfit.BuildConfig
 import com.jianyi.outfit.data.local.dao.WeatherCacheDao
 import com.jianyi.outfit.data.local.entity.WeatherCacheEntity
 import com.jianyi.outfit.data.model.ForecastDay
@@ -13,26 +12,36 @@ import com.jianyi.outfit.data.remote.WeatherCacheCodec
 import com.jianyi.outfit.data.remote.WeatherEnvelope
 import com.jianyi.outfit.data.remote.WeatherResponse
 import com.jianyi.outfit.engine.OutfitRecommendationEngine
+import com.jianyi.outfit.platform.currentTimeMillis
+import com.jianyi.outfit.platform.currentHourOfDay
 import com.jianyi.outfit.platform.formatGeoKey
+import com.jianyi.outfit.platform.hourOfDayFromEpochSeconds
+import com.jianyi.outfit.platform.localDateHourText
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
-import java.text.SimpleDateFormat
-import java.util.Calendar
-import java.util.Date
-import java.util.Locale
-import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlin.math.roundToInt
 
 /**
  * 天气数据仓库实现。
- * 凭证解析：用户在设置页自填的 id/key/apiUrl 优先，留空回退 BuildConfig 内置默认；
+ * 凭证解析：用户在设置页自填的 id/key/apiUrl 优先，留空回退内置默认；
  * 客户端按 baseUrl 缓存复用（Ktor 的 HttpClient 内部持有连接池，一个地址一个实例）。
- * 接口与异常类型在 shared 的同名文件里（同包，无需 import）。
+ *
+ * 「内置默认」以前直接读 BuildConfig，现在改成构造参数 ——
+ * BuildConfig 是 Android 产物里生成的类，commonMain 拿不到。Android 侧由
+ * AppContainer 把 BuildConfig.WEATHER_API_ID / KEY 传进来（值不变），
+ * iOS 侧没有预置凭证这回事，传空串即可，用户必须自己在设置页填。
+ *
+ * 接口与异常类型在同一个包里的 WeatherRepository.kt（同包，无需 import）。
  */
 class WeatherRepositoryImpl(
     private val credentials: Flow<ApiCredentials>,
     private val cacheDao: WeatherCacheDao,
+    private val defaultApiId: String,
+    private val defaultApiKey: String,
+    private val defaultApiUrl: String = DEFAULT_BASE_URL,
     private val apiFactory: (String) -> WeatherApiClient = { WeatherApiClient(it) }
 ) : WeatherRepository {
 
@@ -55,17 +64,28 @@ class WeatherRepositoryImpl(
     private fun isRateLimited(msg: String?): Boolean =
         msg?.contains("频次") == true || msg?.contains("过快") == true
 
-    /** Retrofit 服务按 baseUrl 复用（凭证变更仅影响请求参数，无需重建） */
-    private val apiCache = ConcurrentHashMap<String, WeatherApiClient>()
+    /**
+     * Ktor 客户端按 baseUrl 复用（凭证变更仅影响请求参数，无需重建）。
+     *
+     * 以前是 ConcurrentHashMap，这里换成「Mutex + 普通 MutableMap」：
+     * commonMain 没有 java.util.concurrent，而线程安全不能靠"反正 K/N 新内存模型
+     * 不会崩"糊过去 —— 并发的 getOrPut 真会让两个调用各自建一个 HttpClient，
+     * 每个客户端底下各有一套连接池与线程，泄漏是静默的。
+     * 锁只圈住取/建这一步，网络请求本身在锁外。
+     */
+    private val apiCache = mutableMapOf<String, WeatherApiClient>()
+    private val apiCacheLock = Mutex()
 
     /** 解析当前生效凭证（用户配置优先）并取对应服务 */
     private suspend fun apiContext(): Pair<WeatherApiClient, ApiCredentials> {
         val resolved = credentials.first().resolve(
-            defaultId = BuildConfig.WEATHER_API_ID,
-            defaultKey = BuildConfig.WEATHER_API_KEY,
-            defaultUrl = DEFAULT_BASE_URL
+            defaultId = defaultApiId,
+            defaultKey = defaultApiKey,
+            defaultUrl = defaultApiUrl
         )
-        val api = apiCache.getOrPut(resolved.apiUrl) { apiFactory(resolved.apiUrl) }
+        val api = apiCacheLock.withLock {
+            apiCache.getOrPut(resolved.apiUrl) { apiFactory(resolved.apiUrl) }
+        }
         return api to resolved
     }
 
@@ -140,9 +160,9 @@ class WeatherRepositoryImpl(
                 // 成功后写入缓存并顺手清理过期项（经纬度响应带类型标记，回读时按标记选择 DTO）
                 val payload = WeatherCacheCodec.encode(response, tag)
                 cacheDao.put(
-                    WeatherCacheEntity(cacheKey, payload, System.currentTimeMillis())
+                    WeatherCacheEntity(cacheKey, payload, currentTimeMillis())
                 )
-                runCatching { cacheDao.deleteStale(System.currentTimeMillis() - CACHE_RETENTION_MS) }
+                runCatching { cacheDao.deleteStale(currentTimeMillis() - CACHE_RETENTION_MS) }
                 Result.success(response.toWeather())
             }
         } catch (e: Exception) {
@@ -156,7 +176,7 @@ class WeatherRepositoryImpl(
     /** 读取并解析缓存；ignoreTtl = true 时忽略 30 分钟有效期 */
     private suspend fun readCache(cacheKey: String, ignoreTtl: Boolean): WeatherNow? {
         val cached = cacheDao.get(cacheKey) ?: return null
-        val fresh = System.currentTimeMillis() - cached.cachedAt < CACHE_TTL_MS
+        val fresh = currentTimeMillis() - cached.cachedAt < CACHE_TTL_MS
         if (!fresh && !ignoreTtl) return null
         // 编解码（含「按 type 判别该用哪个 DTO」）在 shared 的 WeatherCacheCodec 里，
         // 那边有单测钉住格式；这里只负责"解不开就当没有缓存"。
@@ -231,7 +251,7 @@ fun WeatherResponse.toForecast(): List<ForecastDay> {
 /** 从更新时间文字中解析小时（如“2026-08-22 12:00:29”→12），失败时取系统当前小时 */
 private fun parseHour(timeText: String): Int {
     runCatching { timeText.substring(11, 13).toInt() }.getOrNull()?.let { return it }
-    return Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+    return currentHourOfDay()
 }
 
 /**
@@ -245,11 +265,10 @@ fun LatLonWeatherResponse.toDomain(): WeatherNow {
     val condition = weather ?: "未知"
     // dt 声明在另一个模块，Kotlin 不做跨模块 smart cast，先落本地变量
     val dtSec = dt
-    val cal = Calendar.getInstance().apply { timeInMillis = (dtSec ?: 0L) * 1000 }
-    val hour = if (dtSec != null) cal.get(Calendar.HOUR_OF_DAY) else Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-    val updateTimeText = if (dtSec != null) {
-        SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(dtSec * 1000))
-    } else ""
+    // 时区换算走 platform/PlatformClock：Android 侧的实现就是原来那两行
+    // Calendar + SimpleDateFormat(Locale.US)，逐字搬过去，展示格式不变
+    val hour = if (dtSec != null) hourOfDayFromEpochSeconds(dtSec) else currentHourOfDay()
+    val updateTimeText = if (dtSec != null) localDateHourText(dtSec) else ""
     return WeatherNow(
         province = "",
         city = name ?: "当前位置",

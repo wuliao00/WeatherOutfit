@@ -2,10 +2,15 @@ package com.jianyi.outfit.data.repository
 
 import com.jianyi.outfit.data.local.dao.CityDao
 import com.jianyi.outfit.data.local.entity.CityEntity
+import com.jianyi.outfit.platform.currentTimeMillis
 import kotlinx.coroutines.flow.Flow
 
 /**
- * 城市仓库接口：管理历史城市列表与当前城市切换，便于 JVM 单测替换实现。
+ * 城市仓库接口 + 实现：管理历史城市列表与当前城市切换，便于 JVM 单测替换实现。
+ *
+ * 这一步能整体下沉，是因为 Room 的 CityEntity 现在也是 shared 里的类型了
+ * （见 data/local/ 下的实体）。此前它卡在 app：接口签名里带 Room 实体，
+ * 而 Room 2.6 只有 Android 产物，等于把整个城市链锁死在 Android。
  */
 interface CityRepository {
 
@@ -37,7 +42,7 @@ class CityRepositoryImpl(private val dao: CityDao) : CityRepository {
     override val currentCity: Flow<CityEntity?> = dao.observeCurrent()
 
     override suspend fun switchTo(province: String, city: String, source: String) {
-        dao.switchTo(province, city, source, System.currentTimeMillis())
+        dao.switchTo(province, city, source, currentTimeMillis())
     }
 
     override suspend fun clearCurrentSelection() = dao.clearCurrent()
@@ -47,7 +52,7 @@ class CityRepositoryImpl(private val dao: CityDao) : CityRepository {
         if (city.isCurrent) {
             dao.latest()?.let { next ->
                 dao.clearCurrent()
-                dao.setCurrent(next.id, System.currentTimeMillis())
+                dao.setCurrent(next.id, currentTimeMillis())
             }
         }
     }

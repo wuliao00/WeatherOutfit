@@ -1,6 +1,7 @@
 package com.jianyi.outfit.di
 
 import android.content.Context
+import com.jianyi.outfit.BuildConfig
 import com.jianyi.outfit.data.AppDependencies
 import com.jianyi.outfit.data.CitySelection
 import com.jianyi.outfit.data.ExtremeAlerter
@@ -55,11 +56,16 @@ class AppContainer(context: Context) : AppDependencies {
     override val settingsRepository: SettingsRepository =
         SettingsRepositoryImpl(context.applicationContext)
 
-    /** 天气数据仓库：凭证取值「用户自填优先，否则 BuildConfig 默认」
-     *  不再需要 gson —— 序列化随网络层一起搬进了 shared（kotlinx.serialization） */
+    /**
+     * 天气数据仓库：凭证取值「用户自填优先，否则内置默认」。
+     * 仓库本体已在 shared（Room/Ktor 都跨端了），BuildConfig 那两个默认值因此
+     * 从「仓库自己去读」变成「Android 这边递进去」—— 值完全一样，只是读法换了。
+     */
     override val weatherRepository: WeatherRepository = WeatherRepositoryImpl(
         credentials = settingsRepository.apiCredentials,
-        cacheDao = cacheDatabase.weatherCacheDao()
+        cacheDao = cacheDatabase.weatherCacheDao(),
+        defaultApiId = BuildConfig.WEATHER_API_ID,
+        defaultApiKey = BuildConfig.WEATHER_API_KEY
     )
 
     /** 城市仓库 */
@@ -116,9 +122,10 @@ class AppContainer(context: Context) : AppDependencies {
     /**
      * 当前城市的跨端最小视图。
      *
-     * CityRepository 本身留在 app（它的签名带 Room 的 CityEntity），
-     * 这里映射成 CitySelection 只暴露 shared 真正需要的两个字段，
-     * 免得 Room 类型顺着接口渗进跨端代码。
+     * CityRepository 这次跟着 Room 一起进了 shared，理论上这里可以直接露 CityEntity。
+     * 但仍然映射成 CitySelection：那是 Room 的**表行**，把它塞进 AppDependencies
+     * 就等于让每个页面都隐含依赖数据库结构（以后加一列、改主键策略都会波及 UI）。
+     * 两个字段的最小视图才是页面真正需要的东西。
      */
     override val currentCity: Flow<CitySelection?> =
         cityRepository.currentCity.map { entity ->

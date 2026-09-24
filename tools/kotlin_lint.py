@@ -27,13 +27,16 @@ SUSPECTS = [
 
 # commonMain 里不能出现的 JVM/Android 专属引用。
 # androidx.* 一般是合法的 —— Compose Multiplatform 在 Android 上就是重定向到 androidx 制品。
-# 但有两个例外（都是真实踩过、本地编译发现不了、只有 CI 的 iOS 任务才报的）：
+# 但有几个例外（都是真实踩过、本地编译发现不了、只有 CI 的 iOS 任务才报的）：
 #   - `Math.`：java.lang.Math 不用 import，所以「没有 java. 前缀」不代表不是 JVM 的；
-#   - `LocalConfiguration`：它依赖 Android 的 Configuration，CMP 没有这个 compositionLocal。
+#   - `LocalConfiguration`：它依赖 Android 的 Configuration，CMP 没有这个 compositionLocal；
+#   - `BuildConfig`：它是 AGP 为 Android 产物生成的类，commonMain 里连 import 都写不出来。
+#     仓库实现下沉 shared 时最容易顺手带的就是它（凭证默认值那处），所以补进黑名单。
 COMMON_MAIN_BANNED = re.compile(
     r"(?<![\w.])(?:java|android|System)(?:\.[A-Za-z_][\w]*){1,}"
     r"|(?<![\w.])Math\.[A-Za-z_]"
     r"|(?<![\w.])LocalConfiguration\b"
+    r"|(?<![\w.])BuildConfig\b"
 )
 
 

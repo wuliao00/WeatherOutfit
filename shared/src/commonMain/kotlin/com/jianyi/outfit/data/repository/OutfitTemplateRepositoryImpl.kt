@@ -12,7 +12,7 @@ import kotlinx.serialization.json.Json
 /**
  * 穿搭模板仓库实现。
  *
- * 接口在 shared 的同名文件里（同包，无需 import）。
+ * 接口在同包的 OutfitTemplateRepository.kt 里（同包，无需 import）。
  *
  * itemsJson 是**用户数据**（自定义模板的单品清单），落盘格式是 JSON 字符串数组。
  * 这里从 Gson 换成 kotlinx.serialization 时，两种格式的写法逐字节一致

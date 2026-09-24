@@ -14,6 +14,19 @@ expect fun todayEpochDay(): Long
 expect fun localClockText(epochSeconds: Long): String
 
 /**
+ * 秒级时间戳 → 本地时区的「yyyy-MM-dd HH:mm:ss」。
+ *
+ * 这是经纬度查询接口给的时间格式，会被当作 WeatherNow.updateTime 直接显示，
+ * 也会被 parseHour 反过来截 [11,13] 取小时 —— 所以两端必须给出同样的定宽格式，
+ * 差一个空格都会让紫外线指数按错误时刻估算。Android 沿用 SimpleDateFormat 的
+ * Locale.US，iOS 用 NSDateFormatter + en_US 对齐。
+ */
+expect fun localDateHourText(epochSeconds: Long): String
+
+/** 秒级时间戳 → 本地时区的 0~23 点（接口只给 UTC 秒数，估算紫外线要本地时刻） */
+expect fun hourOfDayFromEpochSeconds(epochSeconds: Long): Int
+
+/**
  * 公历日期 → 儒略日数（Howard Hinnant 的 days_from_civil，proleptic Gregorian）。
  * 纯数学，不碰任何平台 API，所以放 commonMain：Android 的 java.time 与
  * iOS 的 NSCalendar 算出来的 epoch day 必须和这里一致，否则「今天/明天」会错一天。
