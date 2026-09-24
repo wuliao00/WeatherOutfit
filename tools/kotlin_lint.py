@@ -13,6 +13,9 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 SRC = REPO / "app" / "src"
+# 默认要扫的根。曾经只有 app/src —— 于是 KMP 之后所有 shared 里的 JVM 泄漏
+# 都扫不到，输出「0 problem(s)」的假绿（commonMain 出现 Math. 就是这么漏过去的）。
+DEFAULT_TARGETS = [SRC, REPO / "shared" / "src"]
 
 # 需要人工确认的可疑写法
 SUSPECTS = [
@@ -23,8 +26,15 @@ SUSPECTS = [
 ]
 
 # commonMain 里不能出现的 JVM/Android 专属引用。
-# androidx.* 是合法的 —— Compose Multiplatform 在 Android 上就是重定向到 androidx 制品。
-COMMON_MAIN_BANNED = re.compile(r"(?<![\w.])(?:java|android|System)(?:\.[A-Za-z_][\w]*){1,}")
+# androidx.* 一般是合法的 —— Compose Multiplatform 在 Android 上就是重定向到 androidx 制品。
+# 但有两个例外（都是真实踩过、本地编译发现不了、只有 CI 的 iOS 任务才报的）：
+#   - `Math.`：java.lang.Math 不用 import，所以「没有 java. 前缀」不代表不是 JVM 的；
+#   - `LocalConfiguration`：它依赖 Android 的 Configuration，CMP 没有这个 compositionLocal。
+COMMON_MAIN_BANNED = re.compile(
+    r"(?<![\w.])(?:java|android|System)(?:\.[A-Za-z_][\w]*){1,}"
+    r"|(?<![\w.])Math\.[A-Za-z_]"
+    r"|(?<![\w.])LocalConfiguration\b"
+)
 
 
 def scan_platform_leaks(text: str):
@@ -145,7 +155,7 @@ def rel(path: Path) -> str:
 
 
 def main() -> int:
-    targets = [Path(a) for a in sys.argv[1:]] or [SRC]
+    targets = [Path(a) for a in sys.argv[1:]] or DEFAULT_TARGETS
     files: list[Path] = []
     for t in targets:
         if t.is_dir():

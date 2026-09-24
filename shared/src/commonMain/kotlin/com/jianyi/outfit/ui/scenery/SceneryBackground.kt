@@ -29,15 +29,14 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onSizeChanged
 import org.jetbrains.compose.resources.painterResource
-import androidx.compose.ui.unit.dp
 import com.jianyi.outfit.ui.glass.GlassHost
 import com.jianyi.outfit.ui.glass.glassSource
 import com.jianyi.outfit.ui.theme.LocalReduceMotion
 import com.jianyi.outfit.ui.theme.MotionSpecs
 import kotlinx.coroutines.launch
+import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.sin
 
@@ -77,9 +76,15 @@ fun SceneryBackground(
     onSceneryChange: (Scenery) -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
-    val density = LocalDensity.current
     val reduceMotion = LocalReduceMotion.current
-    val widthPx = with(density) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
+    /**
+     * 容器宽度（像素）。横滑比例与整页位移都以它为单位。
+     *
+     * 不用 `LocalConfiguration.screenWidthDp`：那个 compositionLocal 依赖 Android 的
+     * Configuration，Compose Multiplatform 没有它（本地编译发现不了，只有 iOS 编译会报）。
+     * 改成量真实布局尺寸，顺带修掉一个既有偏差：屏幕宽 ≠ 背景层宽（有 inset 时不等）。
+     */
+    val widthPx = remember { mutableFloatStateOf(1f) }
 
     /** 当前稳定展示的一张 */
     var shown by remember { mutableStateOf(scenery) }
@@ -122,6 +127,7 @@ fun SceneryBackground(
     Box(
         modifier = modifier
             .fillMaxSize()
+            .onSizeChanged { widthPx.floatValue = it.width.toFloat().coerceAtLeast(1f) }
             .graphicsLayer {
                 translationY =
                     if (reduceMotion || !parallaxEnabled) 0f else -scrollPx() * 0.35f
@@ -136,7 +142,7 @@ fun SceneryBackground(
                     Modifier.pointerInput(shown) {
                         detectHorizontalDragGestures(
                             onDragEnd = {
-                                val ratio = abs(dragPx) / widthPx
+                                val ratio = abs(dragPx) / widthPx.floatValue
                                 scope.launch {
                                     if (ratio < 0.30f) {
                                         // 没拖够：弹回，取消换景
@@ -163,7 +169,7 @@ fun SceneryBackground(
                                 incoming = neighborOf(shown, dir)
                                 mode = Transition.SLIDE
                             }
-                            val p = (abs(next) / widthPx).coerceIn(0f, 1f)
+                            val p = (abs(next) / widthPx.floatValue).coerceIn(0f, 1f)
                             scope.launch { progress.snapTo(p) }
                         }
                     }
@@ -192,7 +198,7 @@ fun SceneryBackground(
                     .graphicsLayer {
                         applyTransition(
                             effectiveProgress(incoming, progress),
-                            direction, widthPx, mode, isLeaving = true
+                            direction, widthPx.floatValue, mode, isLeaving = true
                         )
                     }
             )
@@ -205,7 +211,7 @@ fun SceneryBackground(
                         .graphicsLayer {
                             applyTransition(
                                 effectiveProgress(incoming, progress),
-                                direction, widthPx, mode, isLeaving = false
+                                direction, widthPx.floatValue, mode, isLeaving = false
                             )
                         }
                 )
@@ -318,7 +324,7 @@ private fun Modifier.breathingLayer(enabled: Boolean): Modifier {
         label = "breathPhase"
     )
     return graphicsLayer {
-        val wave = sin(phase.value * 2.0 * Math.PI).toFloat()
+        val wave = sin(phase.value * 2.0 * PI).toFloat()
         scaleX = 1f + 0.012f * wave
         scaleY = 1f + 0.012f * wave
         translationY = wave * 7f
