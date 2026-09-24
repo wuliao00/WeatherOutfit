@@ -72,7 +72,7 @@
 - **架构**：MVVM（ViewModel + Repository + Data Source）
 - **网络**：Ktor + kotlinx.serialization（在 `shared` 模块，Android/iOS 共用；Coroutines）
 - **后台任务**：WorkManager（每日推送持久化调度，重启自动恢复）
-- **图片加载**：Coil（天气图标）
+- **图片加载**：Coil3（天气图标；需显式挂 OkHttp fetcher，见 Application）
 - **本地存储**：Room（历史城市、穿搭模板、天气缓存）+ DataStore（轻量配置）
 - **定位**：FusedLocationProviderClient（Google Play Services）
 - **适配**：minSdk 26（Android 8.0）~ targetSdk 35（Android 15），手机/折叠屏/平板自适应布局
@@ -115,7 +115,15 @@
 → ~~天气网络层换 Ktor + kotlinx.serialization（DTO 与缓存编解码进 commonMain，Gson↔kotlinx 等价性由对拍单测钉住）~~ ✅
 → ~~穿搭模板清单迁离 Gson（至此主代码零 Gson；Gson 仅留作对拍测试参照）~~ ✅
 → ~~液态玻璃 + 跟手动效整层进 commonMain（supportsRealtimeBlur / 系统动画缩放 expect/actual 化，材质策略测试随迁 commonTest）~~ ✅
-→ 剩余页面进 commonMain（各 Screen、导航、Coil→Coil3；Screen 依赖的 ViewModel/DataStore 抽象是前置）→ iOS 入口与平台实现 → 通知抽象与 iOS 本地通知。
+→ ~~仓库接口下沉 + 依赖接缝 AppDependencies + 三个 ViewModel（首页/设置/详情）进 commonMain~~ ✅
+→ ~~Coil→Coil3 + 无权限依赖的 UI（卡片/组件/风景背景与抽屉/详情页/主题）进 commonMain~~ ✅
+→ 剩余：HomeScreen/CityScreen/SettingsScreen 与导航（依赖 Manifest 权限检查与 navigation-compose）、
+CityViewModel（随 Room 2.7 KMP）、iOS 入口与平台实现、通知抽象与 iOS 本地通知。
+
+跨端坑记录（都是本地 Android 编译看不见、只有 iOS 编译才报的）：
+`LocalConfiguration` 是 androidx 但 Compose Multiplatform 没有；`Math.PI` 不需要 import
+所以「没有 java. 前缀」不代表不是 JVM 的；`collectAsStateWithLifecycle` 当前版本无 iOS 产物；
+Coil3 不自带网络栈，不显式挂 fetcher 就是静默空白。
 
 > 想在 macOS 上直接跑：`cd ios-probe && ../gradlew compileKotlinIosArm64`。
 > 不带参数即用最保守的 2.1.0 + 1.8.2；`-PkotlinVersion=` / `-PcomposeVersion=` 可覆盖。
@@ -192,26 +200,20 @@ val DarkPrimary = Color(0xFFA7BCDA)   // 暗黑模式主色（保持足够对比
 ## 项目结构
 
 ```
-app/src/main/java/com/jianyi/outfit/
+app/src/main/java/com/jianyi/outfit/   # 只剩 Android 专属部分
 ├── data/
 │   ├── local/           # Room 数据库、DAO、Entity（城市/模板/缓存）
-│   ├── repository/      # 数据仓库层（天气/城市/设置/模板）
-│   └── model/           # 领域模型（天气、偏好、推荐结果、选景与玻璃档位）
-├── ui/
-│   ├── root/            # 应用根节点：风景 + 玻璃宿主 + 主题
-│   ├── glass/           # 液态玻璃材质与组件（唯一的模糊源在此定义）
-│   ├── scenery/         # 风景主题、天气→选景规则、背景层、换景选择器
-│   ├── motion/          # 跟手基础件：按压弹簧、滚动折叠控制器
-│   ├── home/            # 首页（含七日曲线卡、生活指数卡）
-│   ├── detail/          # 穿搭详情（场景横滑 + 模板管理）
-│   ├── city/            # 城市管理（搜索/GPS/历史城市）
-│   ├── settings/        # 设置页（视觉与性能 + 偏好/单位/通知）
-│   ├── theme/           # 颜色、字体、动效弹簧、主题装配
-│   ├── navigation/      # 导航图与转场
-│   └── components/      # 可复用 UI 组件
+│   └── repository/      # 四个仓库实现（接口在 shared；天气实现含 DTO→领域模型转换）
+├── ui/                  # 只有还依赖系统权限/导航的四个页面留在这
+│   ├── root/            # 应用根节点：风景 + 玻璃宿主 + 主题装配
+│   ├── home/            # 首页（权限申请 launcher、AsyncImage 图标）
+│   ├── city/            # 城市管理（搜索/GPS/历史城市 + CityViewModel 依赖 Room Entity）
+│   ├── settings/        # 设置页（通知权限按版本分支）
+│   └── navigation/      # 导航图与转场（navigation-compose）
 ├── notification/        # 通知渠道、每日推送调度（WorkManager）与开机自启接收器
-├── di/                  # 手动依赖容器 + ViewModel 工厂
-└── util/                # 工具类（格式化、定位、网络状态、帧率申请）
+├── di/                  # AppContainer（实现 shared 的 AppDependencies）+ ViewModel 工厂
+├── util/                # 帧率申请、定位（FusedLocation）
+└── MainActivity / WeatherOutfitApp     # 入口；App 同时是 Coil3 的 ImageLoader 工厂
 ```
 
 跨平台的 `shared/` 模块（Android 与 iOS 同源，包名与 app 一致所以 app 侧零 import 改动）：
@@ -222,10 +224,18 @@ shared/src/
 │   ├── engine/          # 穿搭推荐引擎、生活指数引擎（纯 Kotlin，可单测）
 │   ├── data/model/      # 领域模型
 │   ├── data/remote/     # Ktor 客户端、@Serializable DTO、缓存编解码（格式兼容旧 Gson 行）
-│   ├── ui/scenery/      # 风景主题与天气→选景规则（图片用 CMP 资源）
-│   └── platform/        # expect/actual：时间与月份（JVM 泄漏已由本地 lint 守住）
-├── androidMain/ iosMain/  # 各平台 actual（HTTP 引擎：OkHttp / Darwin）
-└── commonTest/          # 缓存格式的"钉子"测试（历史 Gson 行必须一直能读）
+│   ├── data/repository/ # 三个仓库接口（实现在 app：Room / DataStore）
+│   ├── data/AppDependencies.kt  # ViewModel 的依赖接缝 + 平台能力接口
+│   ├── ui/glass/        # 液态玻璃材质（唯一的模糊源与四条红线）
+│   ├── ui/motion/       # 跟手基础件：按压弹簧、折叠控制器
+│   ├── ui/scenery/      # 风景主题、选景规则、背景层与抽屉（图片用 CMP 资源）
+│   ├── ui/theme/        # 颜色 token、字体形状、主题装配、动效规范
+│   ├── ui/home|detail|settings/  # 三个 ViewModel + 详情页
+│   ├── ui/components/   # 通用组件与使用须知弹窗
+│   ├── util/            # Formatters（日期用纯儒略日算术）
+│   └── platform/        # expect/actual：时间/月份/时区、坐标 key、HTTP 引擎
+├── androidMain/ iosMain/  # 各平台 actual（OkHttp/Darwin、RenderEffect 门槛、系统动画开关）
+└── commonTest/          # 缓存格式与玻璃材质的"钉子"测试
 ```
 
 仓库根的其它目录：`tools/` 是出图、取色、括号自查等辅助脚本；`ios-probe/` 是**独立的
