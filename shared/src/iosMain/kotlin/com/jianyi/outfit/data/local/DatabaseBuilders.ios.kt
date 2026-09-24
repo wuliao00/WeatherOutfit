@@ -37,6 +37,13 @@ fun buildWeatherCacheDatabase(): WeatherCacheDatabase =
  * `error = null` 那个参数是 `CPointer<ObjCObjectVar<NSError?>>?`，属于 C 互操作面，
  * Kotlin 2.x 要求显式 @OptIn(ExperimentalForeignApi) —— 本机是 Windows，iOS target
  * 直接不参与编译，这个错只能由 CI 的 mac job 报出来（第一次推就报了）。
+ *
+ * **`create = true` 不是装饰**：iOS 模拟器测试跑出来的第一个失败就是
+ * `Unable to open database '…/data/Documents/jianyi.db'` —— 路径解析是对的，
+ * 但那个 Documents 目录当时并不存在，而 sqlite 打开时不会自己建父目录。
+ * 真 app 的沙盒里 Documents 由系统预建，所以这条只在测试容器这类环境才看得出来；
+ * 对已存在的目录它是幂等无操作，两种环境都成立。
+ * （这正是"编译通过 ≠ 能跑"的实例：这一行错着的时候，iOS 编译与链接全绿。）
  */
 @OptIn(ExperimentalForeignApi::class)
 private fun databaseFile(name: String): String {
@@ -44,7 +51,7 @@ private fun databaseFile(name: String): String {
         directory = NSDocumentDirectory,
         inDomain = NSUserDomainMask,
         appropriateForURL = null,
-        create = false,
+        create = true,
         error = null
     )
     return requireNotNull(url?.path) { "取不到 iOS 沙盒 Documents 目录" } + "/$name"
