@@ -5,10 +5,21 @@ import com.jianyi.outfit.util.acquireWithinBudget
 import kotlin.system.measureTimeMillis
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+
+/**
+ * 看门狗：外层再套一个远大于预算的硬超时。
+ *
+ * 没有它，「超时被删掉」这种回归的表现是**测试永远挂着不返回**（被测的就是
+ * "永不回调"，去掉上限后自然真的永不结束），CI 会卡到 job 超时而不是给一个
+ * 红色失败 —— 既慢又难归因。套上之后那种回归在 3 秒内以
+ * TimeoutCancellationException 失败，信息直接指向"预算没生效"。
+ */
+private const val WATCHDOG_MS = 3_000L
 
 /**
  * 取位总超时（LOCATION_BUDGET_MS）的行为验证。
@@ -36,11 +47,13 @@ class LocationBudgetTest {
     fun `a source that never returns is cut off by the budget and yields null`() = runBlocking {
         var cancelled = false
         val elapsed = measureTimeMillis {
-            val result = acquireWithinBudget(
-                budgetMs = 60,
-                cached = { hangsForever { cancelled = true } },
-                fresh = { hangsForever { cancelled = true } }
-            )
+            val result = withTimeout(WATCHDOG_MS) {
+                acquireWithinBudget(
+                    budgetMs = 60,
+                    cached = { hangsForever { cancelled = true } },
+                    fresh = { hangsForever { cancelled = true } }
+                )
+            }
             assertNull(result)
         }
         assertTrue("等待应被超时切断，而不是留一个永远挂着的协程", cancelled)
