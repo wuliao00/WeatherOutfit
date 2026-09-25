@@ -175,9 +175,14 @@ class IosRouter {
         go(IosRoute.DETAIL)
     }
 
+    /**
+     * 出栈。**不清 detailKey** —— 退场动画那一段时间里 AnimatedContent 还在渲染
+     * DETAIL 页，清掉会让 detailVm 当场变 null，页面在退出的最后一帧直接空掉（视觉上跳一下）。
+     * 留着它也没有副作用：detailKey 只在 route == DETAIL 时被读，而进详情页的唯一入口
+     * [openDetail] 每次都会写入新的 key，不存在"拿着上一次的 key 渲染"这种情况。
+     */
     fun back() {
         if (stack.size > 1) stack.removeAt(stack.lastIndex)
-        detailKey = null
         current = stack.last()
     }
 }

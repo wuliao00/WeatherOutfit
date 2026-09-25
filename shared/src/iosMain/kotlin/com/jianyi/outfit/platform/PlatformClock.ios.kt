@@ -1,6 +1,5 @@
 package com.jianyi.outfit.platform
 
-import platform.Foundation.NSCalendar
 import platform.Foundation.NSCalendarUnitDay
 import platform.Foundation.NSCalendarUnitHour
 import platform.Foundation.NSCalendarUnitMinute
@@ -13,7 +12,7 @@ import platform.Foundation.timeIntervalSince1970
 
 /** 用 NSCalendar 取本地年月日，再交给 commonMain 的纯算术换算成儒略日 */
 actual fun todayEpochDay(): Long {
-    val cal = NSCalendar.currentCalendar
+    val cal = jianyiCalendar()
     val now = NSDate()
     val y = cal.component(NSCalendarUnitYear, now).toInt()
     val m = cal.component(NSCalendarUnitMonth, now).toInt()
@@ -23,7 +22,7 @@ actual fun todayEpochDay(): Long {
 
 /** 本地时区的 HH:mm，不足两位补零（与 Android 的 SimpleDateFormat("HH:mm") 同观感） */
 actual fun localClockText(epochSeconds: Long): String {
-    val cal = NSCalendar.currentCalendar
+    val cal = jianyiCalendar()
     val date = NSDate.dateWithTimeIntervalSince1970(epochSeconds.toDouble())
     val h = cal.component(NSCalendarUnitHour, date).toInt()
     val min = cal.component(NSCalendarUnitMinute, date).toInt()
@@ -40,7 +39,7 @@ actual fun localClockText(epochSeconds: Long): String {
  * 而且与上面的 localClockText 同源。
  */
 actual fun localDateHourText(epochSeconds: Long): String {
-    val cal = NSCalendar.currentCalendar
+    val cal = jianyiCalendar()
     val date = NSDate.dateWithTimeIntervalSince1970(epochSeconds.toDouble())
     val y = cal.component(NSCalendarUnitYear, date).toInt()
     val mo = cal.component(NSCalendarUnitMonth, date).toInt()
@@ -52,7 +51,7 @@ actual fun localDateHourText(epochSeconds: Long): String {
 }
 
 actual fun hourOfDayFromEpochSeconds(epochSeconds: Long): Int =
-    NSCalendar.currentCalendar.component(
+    jianyiCalendar().component(
         NSCalendarUnitHour,
         NSDate.dateWithTimeIntervalSince1970(epochSeconds.toDouble())
     ).toInt()

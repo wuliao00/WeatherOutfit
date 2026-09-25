@@ -4,11 +4,11 @@ import com.jianyi.outfit.data.model.TempUnit
 import com.jianyi.outfit.platform.currentTimeMillis
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import platform.Foundation.NSUserDefaults
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
-import kotlin.test.assertTrue
 
 /**
  * iOS 偏好后端（NSUserDefaults 里那个带类型标签的 JSON）的**运行**测试。
@@ -47,6 +47,43 @@ class NSUserDefaultsBackendIosTest {
         backend.edit { this[intKey] = null }
         assertFalse(backend.entries.first().containsKey(intKey), "写 null 必须删键")
         assertEquals("摄氏$stamp", backend.entries.first()[strKey], "删一个键不该牵连其它键")
+    }
+
+    /**
+     * 读不懂的那份偏好**不能被下一次写静默抹掉**。
+     *
+     * 钉的是最危险的一类回归：`catch → 空表 → 整体写回`。表现不是崩溃也不是报错，
+     * 而是"用户所有设置悄悄回到默认"，而且一旦写回原数据就永久没了，事后连查都没得查。
+     */
+    @Test
+    fun unreadable_blob_is_preserved_instead_of_being_overwritten() = runBlocking {
+        // 与 NSUserDefaultsPreferenceBackend 里同一个键名（那边是 private，测试只能照抄）。
+        // 改了那边忘了改这里的话，这个用例会因"读不到旁路键"而失败，不会假绿。
+        val blobKey = "jianyi.preferences.v1"
+        val sideKey = "$blobKey.unreadable"
+        val defaults = NSUserDefaults.standardUserDefaults
+        val stamp = currentTimeMillis()
+        val foreign = """{"temp_unit":{"z":"开尔文"},"only_unknown_$stamp":{"q":1}}"""
+
+        defaults.setObject(value = foreign, forKey = blobKey)
+        defaults.setObject(value = null, forKey = sideKey)
+
+        val backend = NSUserDefaultsPreferenceBackend()
+        // 标签不认识 → 整份视为解不开，内存从空开始
+        assertNull(backend.entries.first()["temp_unit"])
+
+        backend.edit { this["temp_unit"] = "CELSIUS" }
+
+        assertEquals(
+            foreign,
+            defaults.stringForKey(sideKey),
+            "解不开的原文必须被转到旁路键，不能被这次写覆盖掉"
+        )
+        assertEquals("CELSIUS", backend.entries.first()["temp_unit"])
+
+        // 清场，别污染同机后续用例
+        defaults.setObject(value = null, forKey = blobKey)
+        defaults.setObject(value = null, forKey = sideKey)
     }
 
     /** 仓库 → 后端整条链在 iOS 上跑通（读回的值来自磁盘上那份 JSON，不是内存） */

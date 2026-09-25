@@ -1,6 +1,5 @@
 package com.jianyi.outfit.platform
 
-import platform.Foundation.NSCalendar
 import platform.Foundation.NSCalendarUnitDayOfYear
 import platform.Foundation.NSCalendarUnitHour
 import platform.Foundation.NSCalendarUnitMonth
@@ -19,12 +18,12 @@ actual fun currentTimeMillis(): Long = (NSDate().timeIntervalSince1970 * 1000.0)
  * "两边都 +1" 的地方，而且错了也不崩，只是 iOS 上偶尔选错季节风景。
  */
 actual fun currentMonth(): Int =
-    NSCalendar.currentCalendar.component(NSCalendarUnitMonth, NSDate()).toInt()
+    jianyiCalendar().component(NSCalendarUnitMonth, NSDate()).toInt()
 
 /** 0~23，与 Android 的 Calendar.HOUR_OF_DAY 同语义（都是本地时区墙钟） */
 actual fun currentHourOfDay(): Int =
-    NSCalendar.currentCalendar.component(NSCalendarUnitHour, NSDate()).toInt()
+    jianyiCalendar().component(NSCalendarUnitHour, NSDate()).toInt()
 
 /** 1~366，与 Android 的 Calendar.DAY_OF_YEAR 同语义 */
 actual fun currentDayOfYear(): Int =
-    NSCalendar.currentCalendar.component(NSCalendarUnitDayOfYear, NSDate()).toInt()
+    jianyiCalendar().component(NSCalendarUnitDayOfYear, NSDate()).toInt()

@@ -17,7 +17,6 @@ import platform.CoreLocation.CLLocationManagerDelegateProtocol
 import platform.CoreLocation.kCLAuthorizationStatusAuthorizedAlways
 import platform.CoreLocation.kCLAuthorizationStatusAuthorizedWhenInUse
 import platform.CoreLocation.kCLAuthorizationStatusNotDetermined
-import platform.Foundation.NSCalendar
 import platform.Foundation.NSCalendarUnitHour
 import platform.Foundation.NSCalendarUnitMinute
 import platform.Foundation.NSCalendarUnitSecond
@@ -83,9 +82,15 @@ class IosLocationProvider : LocationProvider {
         if (!hasPermission()) return null
         return withTimeoutOrNull(LOCATION_TIMEOUT_MS) {
             suspendCancellableCoroutine { cont ->
-                // 超时或页面取消时把回调摘掉：之后系统再回吐位置也不会有人 resume 第二次
-                cont.invokeOnCancellation { delegate.onLocation = null }
-                delegate.onLocation = { point -> if (cont.isActive) cont.resume(point) }
+                // 每次等待带一个自己的所有权标记，取消时**只摘自己那一份**。
+                // 早先的写法是"取消时把那个唯一的回调槽置 null"，而调用点有三处
+                // （HomeViewModel 两处、CityViewModel 一处）共用同一个 provider：
+                // 前一次超时或页面销毁时，会把后一次刚登记的回调清掉，
+                // 于是后一次永远等不到回调、白等满 10 秒返回 null ——
+                // 症状是"明明定位成功，界面却说定位失败"。
+                val owner = Any()
+                delegate.beginLocation(owner) { point -> if (cont.isActive) cont.resume(point) }
+                cont.invokeOnCancellation { delegate.cancelLocation(owner) }
                 manager.requestLocation()
             }
         }
@@ -108,8 +113,34 @@ class IosLocationProvider : LocationProvider {
 
     /** CLLocationManagerDelegate 的实现体，只实现用到的三个回调 */
     private class LocationDelegate : NSObject(), CLLocationManagerDelegateProtocol {
-        var onLocation: ((GeoPoint?) -> Unit)? = null
+        /**
+         * 位置回调只有一个槽位 —— 这是 CLLocationManager 本身的限制
+         * （`requestLocation()` 的两次请求会合并成一次回吐），所以这里做的是
+         * "别把别人的槽位误清掉"，而不是"同时服务两个等待者"。
+         * 后来的调用会接管槽位，被接管的那一次走超时 → 返回 null → 上层退到 IP 定位。
+         */
+        private var locationOwner: Any? = null
+        private var onLocation: ((GeoPoint?) -> Unit)? = null
         var onAuthorization: ((Boolean) -> Unit)? = null
+
+        fun beginLocation(owner: Any, callback: (GeoPoint?) -> Unit) {
+            locationOwner = owner
+            onLocation = callback
+        }
+
+        /** 只有槽位还归这次等待时才清；已被后来者接管就不能碰 */
+        fun cancelLocation(owner: Any) {
+            if (locationOwner !== owner) return
+            locationOwner = null
+            onLocation = null
+        }
+
+        private fun deliverLocation(point: GeoPoint?) {
+            val callback = onLocation
+            locationOwner = null
+            onLocation = null
+            callback?.invoke(point)
+        }
 
         override fun locationManager(
             manager: CLLocationManager,
@@ -125,19 +156,15 @@ class IosLocationProvider : LocationProvider {
 
         override fun locationManager(manager: CLLocationManager, didUpdateLocations: List<*>) {
             val last = didUpdateLocations.lastOrNull() as? CLLocation ?: return
-            val callback = onLocation
-            onLocation = null
             // CLLocationCoordinate2D 是 C 结构体，K/N 里它是 CValue，字段要用
             // useContents 取（直接 .latitude 报 Unresolved reference）
             val lat = last.coordinate.useContents { latitude }
             val lon = last.coordinate.useContents { longitude }
-            callback?.invoke(GeoPoint(lat, lon))
+            deliverLocation(GeoPoint(lat, lon))
         }
 
         override fun locationManager(manager: CLLocationManager, didFailWithError: NSError) {
-            val callback = onLocation
-            onLocation = null
-            callback?.invoke(null)
+            deliverLocation(null)
         }
     }
 }
@@ -227,7 +254,7 @@ class IosPushScheduler : PushScheduler {
 
 /** 距离下一个 `hour`:00 还有多少秒（至少 1 秒 —— iOS 不接受 0 间隔） */
 private fun secondsUntilNextAt(hour: Int): Double {
-    val cal = NSCalendar.currentCalendar
+    val cal = jianyiCalendar()
     val now = NSDate()
     val nowSec = cal.component(NSCalendarUnitHour, now).toInt() * 3600 +
         cal.component(NSCalendarUnitMinute, now).toInt() * 60 +
