@@ -51,25 +51,27 @@ jobs:
       - name: Compile shared for iosArm64 + iosSimulatorArm64
         run: |
           if ! ./gradlew :shared:compileKotlinIosArm64 :shared:compileKotlinIosSimulatorArm64 --no-daemon --stacktrace; then
-            # 冷缓存下的自愈重试。2026-09-25 合并到 main 后这个 job 连着红两次，报的是
+            # 冷缓存下的第二次调用。2026-09-25 合并到 main 后这个 job 连着红，报的是
             #   :shared:kspKotlinIosArm64 -> java.lang.ClassNotFoundException:
             #       org.jetbrains.kotlin.cli.utilities.MainKt
-            # 它前一行还有 "Can't find env_blacklist file at ~/.konan/kotlin-native-prebuilt-…/tools/"，
-            # 两处合起来指向"负责解包 Kotlin/Native 预置包的那个 compiler jar 只落了半截"，
-            # 而不是代码编不过 —— 同一个提交 ab55e49 在 feat/kmp-network 上 30 分钟前刚全绿
-            # （含模拟器真跑 42 条），差别只在缓存。
+            # 前一行是 "Can't find env_blacklist file at ~/.konan/kotlin-native-prebuilt-…/tools/"。
+            # MainKt 这个类由 Kotlin/Native 预置包自己带着（~/.konan/…/kotlin/lib/ 里），
+            # 报它找不到 = 那一刻 KSP 的 classpath 指向了一个还没落盘的预置包目录。
             #
             # 为什么分支绿、main 红：GitHub 的 Actions 缓存按分支隔离，分支上存的
             # shared-ios-* 缓存不给 main 用（仓库 15 条缓存里 4 条 shared-ios-* 全挂在
             # refs/heads/feat/kmp-network 下，main 一条都没有），日志里就是那句
             # "Cache not found for input keys: shared-ios-macOS-c2bc8a18…"。
-            # 于是 main 每次都是冷缓存，每次都坏在同一次坏下载上 —— 不会自己变绿。
+            # 于是 main 每次冷缓存、每次都在同一步坏，不会自己变绿。
             #
-            # 清掉两处再跑一次：~/.konan 重下预置包，--refresh-dependencies 强制重取
-            # 可能损坏的 jar。第二次还失败，那才是真问题，让它红。
-            echo "::warning::冷缓存下 Kotlin/Native 预置包/编译器 jar 疑似损坏，清掉 ~/.konan 与依赖缓存重试一次"
-            rm -rf ~/.konan
-            ./gradlew :shared:compileKotlinIosArm64 :shared:compileKotlinIosSimulatorArm64 --no-daemon --stacktrace --refresh-dependencies
+            # 关键：**不要删 ~/.konan**。上一版这里先 rm -rf ~/.konan 再带
+            # --refresh-dependencies 重试，结果两次失败一模一样（47 秒后同样报 MainKt），
+            # run 36128802693 就是证据 —— 说明不是"下载坏了"，而是预置包在本次构建里
+            # 装好的时机太晚；删掉它等于让第二次也冷着开始，白重试。
+            # 现在只重跑一次：第一次已经把预置包解到磁盘上，换一个全新 Gradle 进程
+            # 重新解析 classpath 就能看见它。第二次还失败才是真问题，让它红。
+            echo "::warning::冷缓存下 Kotlin/Native 预置包在首次构建里装得太晚，保留 ~/.konan 重跑一次"
+            ./gradlew :shared:compileKotlinIosArm64 :shared:compileKotlinIosSimulatorArm64 --no-daemon --stacktrace
           fi
 
       # 编译通过 ≠ 能跑。这一层的失败模式全是运行期的：Room 没挂上驱动、schema 校验不过、
