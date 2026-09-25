@@ -48,55 +48,19 @@ jobs:
           key: shared-ios-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml', 'shared/**', 'build.gradle.kts', 'settings.gradle.kts') }}
           restore-keys: shared-ios-${{ runner.os }}-
 
+      # Kotlin/Native 预置包的安装开关放在根 gradle.properties 里
+      # （kotlin.native.toolchain.enabled=false），这里不再重复传 -P。
+      # 为什么必须关：2.1 的新 toolchain 会把预置包当 maven 制品解析，
+      # 在这个环境下它**静默解析不到任何东西**（gradle 缓存里连 *native-prebuilt* 都没有），
+      # 于是 ~/.konan 压根没被创建，K/N 编译器却在 KotlinNativeToolRunner.runInProcess
+      # 里直接去那个不存在的路径反射加载 MainKt —— 表现就是
+      # kspKotlinIosArm64 报 ClassNotFoundException: org.jetbrains.kotlin.cli.utilities.MainKt。
+      # 关掉后日志里能看到真正的安装过程：
+      #   Please wait while Kotlin/Native compiler 2.1.0 is being installed.
+      #   Unpack Kotlin/Native compiler to /Users/runner/.konan/kotlin-native-prebuilt-macos-aarch64-2.1.0
+      # 这条不只影响 CI：任何第一次拉这个仓库的 macOS 机器都会撞同一个坑。
       - name: Compile shared for iosArm64 + iosSimulatorArm64
-        # 诊断已经给出硬事实（run 36130854067 的 post-failure 那一步）：
-        # 构建**失败之后** ~/.konan 依然完全不存在，而 gradle 缓存里
-        # kotlin-compiler-embeddable-2.1.0.jar 是 58,801,389 字节的完整文件。
-        # 也就是：K/N 预置包根本没被安装过（不是装坏、不是下载截断），
-        # 而 KotlinNativeToolRunner.runInProcess 直接去那个不存在的路径反射加载
-        # MainKt，于是 CNFE + "Can't find env_blacklist file at …"。
-        # 本机 :shared:tasks --all 也确认 KGP 2.1.0 没有 downloadKotlinNativeDistribution
-        # 这类任务可调（只有 setupLldbScript 带 konan），安装是懒的、由编译任务触发。
-        #
-        # 所以这一轮试关掉 2.1 的 native toolchain（默认从 maven 解析
-        # kotlin-native-prebuilt 制品 —— 缓存里连 *native-prebuilt* 都没有，说明那次
-        # 解析什么都没拿到），回到"从 download.jetbrains.com 装到 ~/.konan"的老路径。
-        # 下一步的诊断会告诉我们 ~/.konan 到底有没有被建出来。
-        run: ./gradlew :shared:compileKotlinIosArm64 :shared:compileKotlinIosSimulatorArm64 --no-daemon --stacktrace -Pkotlin.native.toolchain.enabled=false
-
-      # 一次性诊断，查清就删。已经排除的假设（都是被自己的实验推翻的，不是想当然）：
-      # 1) "下载坏了" → rm -rf ~/.konan + --refresh-dependencies 重试，47 秒后同一个错；
-      # 2) "预置包在本次构建里装晚了" → 保留 ~/.konan 重跑，第二次 11 秒就红，同一个错；
-      # 3) "runner 镜像自带残缺的 ~/.konan" → 构建前查，~/.konan 压根不存在（真冷启动），
-      #    磁盘还剩 95Gi，gradle 缓存里也没有任何 *native-prebuilt* 制品。
-      # 现在要的是**失败之后**磁盘上到底长什么样：预置包目录在不在、多大、
-      # tools/env_blacklist 与 kotlin/lib/*.jar 有没有、那份 tar.gz 落在哪、多大。
-      # 这几种可能各自对应不同的修法，不能再靠猜。
-      - name: Diagnose Kotlin/Native distribution state (post-failure)
-        if: failure()
-        run: |
-          set +e   # Actions 默认 bash -e，诊断里 ls/find 找不到东西是预期的
-          echo "=== ~/.konan 顶层 ==="
-          ls -la ~/.konan
-          echo "=== 每个目录多大 ==="
-          du -sh ~/.konan/* 2>/dev/null
-          echo "=== 预置包内部结构 ==="
-          for d in ~/.konan/kotlin-native-prebuilt-*; do
-            [ -d "$d" ] || continue
-            echo "--- $d"
-            ls -la "$d"
-            echo "  [tools]"; ls -la "$d/tools"
-            echo "  [env_blacklist 在不在]"; ls -la "$d/tools/env_blacklist"
-            echo "  [kotlin/lib 条目数]"; ls "$d/kotlin/lib" | wc -l
-            echo "  [kotlin/lib 前 20 个]"; ls -la "$d/kotlin/lib" | head -20
-            echo "  [有没有 MainKt 所在的 jar]"; ls -la "$d/kotlin/lib" | grep -iE "compiler|utilities"
-          done
-          echo "=== 完成标记 ==="
-          ls -la ~/.konan | grep -iE "complete|lock"
-          echo "=== gradle 缓存里的 kotlin 编译器 jar 与 K/N 包 ==="
-          find ~/.gradle/caches -iname "*native-prebuilt*" -o -iname "kotlin-compiler-embeddable*.jar" 2>/dev/null | head -20
-          echo "=== 上述文件的大小 ==="
-          find ~/.gradle/caches \( -iname "*native-prebuilt*" -o -iname "kotlin-compiler-embeddable*.jar" \) -exec ls -la {} \; 2>/dev/null | head -20
+        run: ./gradlew :shared:compileKotlinIosArm64 :shared:compileKotlinIosSimulatorArm64 --no-daemon --stacktrace
 
       # 编译通过 ≠ 能跑。这一层的失败模式全是运行期的：Room 没挂上驱动、schema 校验不过、
       # 生成的 Impl 找不到、flow 不推送；偏好的类型标签写错也只是"值悄悄漂移"。
