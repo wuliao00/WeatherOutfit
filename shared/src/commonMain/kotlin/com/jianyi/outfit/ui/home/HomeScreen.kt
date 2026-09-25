@@ -391,13 +391,27 @@ private fun HomeContent(
                     modifier = Modifier.size(17.dp)
                 )
                 Spacer(Modifier.width(8.dp))
+                // 状态和动作分两段画。原来是一整句
+                // "IP 粗略定位，城市可能有偏差 · 点此改用 GPS"，在 1080px 宽的屏上
+                // 被 maxLines=1 的省略号从尾部吃掉 —— 真机 2026-09-25 实测只剩
+                // "IP 粗略定位，城市可能有偏差 · …"：这行唯一的动作提示（点此改用 GPS）
+                // 完全看不见，而无障碍树里 text 是完整的 26 个字，dump 看不出问题。
+                // 现在左侧状态可以让位（weight + 省略号），右侧动作永不换行、永不裁切。
                 Text(
-                    text = "IP 粗略定位，城市可能有偏差 · 点此改用 GPS",
+                    text = "IP 粗略定位，或有偏差",
                     style = MaterialTheme.typography.bodyMedium,
                     color = onColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "改用 GPS",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    softWrap = false
                 )
             }
         }
