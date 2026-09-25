@@ -48,29 +48,52 @@ jobs:
           key: shared-ios-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml', 'shared/**', 'build.gradle.kts', 'settings.gradle.kts') }}
           restore-keys: shared-ios-${{ runner.os }}-
 
+      # 一次性诊断（查清 kspKotlinIosArm64 的 MainKt CNFE 后删掉）。
+      # 已排除两个假设：不是"下载坏了"（rm -rf ~/.konan + --refresh-dependencies 重试，
+      # 47 秒后报一模一样的错），也不是"预置包在本次构建里装晚了"（保留 ~/.konan 重跑一次，
+      # 第二次 11 秒就红，同一处）。
+      # 现在的判据：失败时日志里有 "Can't find env_blacklist file at
+      # /Users/runner/.konan/kotlin-native-prebuilt-macos-aarch64-2.1.0/tools/env_blacklist"，
+      # 而所有绿的 run 里这句出现 0 次 —— 说明磁盘上那份预置包确实是缺文件的，
+      # 且 KGP 没有重新下载它（47 秒不够下 1GB）。这一步就是看：
+      # runner 镜像是不是本来就带了一个残缺的 ~/.konan，让 KGP 误以为"已经装好了"。
+      - name: Diagnose Kotlin/Native distribution state
+        run: |
+          set +e   # Actions 默认用 bash -e，诊断里的 ls/find 找不到东西是正常的，别让它中断这一步
+          echo "=== df -h（磁盘满也会造成解包缺文件）==="
+          df -h /Users/runner || true
+          echo "=== ~/.konan 顶层 ==="
+          ls -la ~/.konan || echo "~/.konan 不存在（真冷启动）"
+          echo "=== 预置包目录里到底有什么 ==="
+          for d in ~/.konan/kotlin-native-prebuilt-*; do
+            [ -d "$d" ] || continue
+            echo "--- $d"; du -sh "$d"; ls -la "$d"
+            echo "  tools/:"; ls -la "$d/tools" 2>&1 | head -5
+            echo "  kotlin/lib/ 里的 jar:"; ls -la "$d/kotlin/lib" 2>&1 | head -8
+            echo "  完成标记:"; ls -la "$d".* 2>/dev/null; ls -la ~/.konan | grep -i complete || echo "  （无 .complete 标记）"
+          done
+          echo "=== gradle 缓存里的 kotlin-native-prebuilt 制品（大小对不对）==="
+          find ~/.gradle/caches/modules-2 -iname "*native-prebuilt*" -size -1c 2>/dev/null | head -5
+          find ~/.gradle/caches/modules-2 -iname "*native-prebuilt*" 2>/dev/null | head -8
+
       - name: Compile shared for iosArm64 + iosSimulatorArm64
         run: |
           if ! ./gradlew :shared:compileKotlinIosArm64 :shared:compileKotlinIosSimulatorArm64 --no-daemon --stacktrace; then
             # 冷缓存下的第二次调用。2026-09-25 合并到 main 后这个 job 连着红，报的是
             #   :shared:kspKotlinIosArm64 -> java.lang.ClassNotFoundException:
             #       org.jetbrains.kotlin.cli.utilities.MainKt
-            # 前一行是 "Can't find env_blacklist file at ~/.konan/kotlin-native-prebuilt-…/tools/"。
-            # MainKt 这个类由 Kotlin/Native 预置包自己带着（~/.konan/…/kotlin/lib/ 里），
-            # 报它找不到 = 那一刻 KSP 的 classpath 指向了一个还没落盘的预置包目录。
+            # 栈顶是 KotlinNativeToolRunner.runInProcess —— 它从 ~/.konan 那份预置包里
+            # 反射加载 MainKt，包缺文件就报 CNFE。
             #
             # 为什么分支绿、main 红：GitHub 的 Actions 缓存按分支隔离，分支上存的
             # shared-ios-* 缓存不给 main 用（仓库 15 条缓存里 4 条 shared-ios-* 全挂在
             # refs/heads/feat/kmp-network 下，main 一条都没有），日志里就是那句
             # "Cache not found for input keys: shared-ios-macOS-c2bc8a18…"。
-            # 于是 main 每次冷缓存、每次都在同一步坏，不会自己变绿。
             #
-            # 关键：**不要删 ~/.konan**。上一版这里先 rm -rf ~/.konan 再带
-            # --refresh-dependencies 重试，结果两次失败一模一样（47 秒后同样报 MainKt），
-            # run 36128802693 就是证据 —— 说明不是"下载坏了"，而是预置包在本次构建里
-            # 装好的时机太晚；删掉它等于让第二次也冷着开始，白重试。
-            # 现在只重跑一次：第一次已经把预置包解到磁盘上，换一个全新 Gradle 进程
-            # 重新解析 classpath 就能看见它。第二次还失败才是真问题，让它红。
-            echo "::warning::冷缓存下 Kotlin/Native 预置包在首次构建里装得太晚，保留 ~/.konan 重跑一次"
+            # 这里保留 ~/.konan 重跑一次（上一版先 rm -rf 再 --refresh-dependencies，
+            # 47 秒后同样报 MainKt，说明删了也是从同一个来源重建、照样缺文件）。
+            # 还红就按上面那步的诊断结果改，不再盲试第三次。
+            echo "::warning::首次编译失败，保留 ~/.konan 重跑一次（诊断信息见上一步）"
             ./gradlew :shared:compileKotlinIosArm64 :shared:compileKotlinIosSimulatorArm64 --no-daemon --stacktrace
           fi
 
