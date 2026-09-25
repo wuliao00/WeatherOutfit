@@ -49,9 +49,20 @@ jobs:
           restore-keys: shared-ios-${{ runner.os }}-
 
       - name: Compile shared for iosArm64 + iosSimulatorArm64
-        # 冷缓存下这一步会红（见下一步诊断）。绿的 run 里 kspKotlinIosArm64 是真执行的，
-        # 不是缓存命中 —— 所以差别只在磁盘上有没有一份"已经装好"的 Kotlin/Native 预置包。
-        run: ./gradlew :shared:compileKotlinIosArm64 :shared:compileKotlinIosSimulatorArm64 --no-daemon --stacktrace
+        # 诊断已经给出硬事实（run 36130854067 的 post-failure 那一步）：
+        # 构建**失败之后** ~/.konan 依然完全不存在，而 gradle 缓存里
+        # kotlin-compiler-embeddable-2.1.0.jar 是 58,801,389 字节的完整文件。
+        # 也就是：K/N 预置包根本没被安装过（不是装坏、不是下载截断），
+        # 而 KotlinNativeToolRunner.runInProcess 直接去那个不存在的路径反射加载
+        # MainKt，于是 CNFE + "Can't find env_blacklist file at …"。
+        # 本机 :shared:tasks --all 也确认 KGP 2.1.0 没有 downloadKotlinNativeDistribution
+        # 这类任务可调（只有 setupLldbScript 带 konan），安装是懒的、由编译任务触发。
+        #
+        # 所以这一轮试关掉 2.1 的 native toolchain（默认从 maven 解析
+        # kotlin-native-prebuilt 制品 —— 缓存里连 *native-prebuilt* 都没有，说明那次
+        # 解析什么都没拿到），回到"从 download.jetbrains.com 装到 ~/.konan"的老路径。
+        # 下一步的诊断会告诉我们 ~/.konan 到底有没有被建出来。
+        run: ./gradlew :shared:compileKotlinIosArm64 :shared:compileKotlinIosSimulatorArm64 --no-daemon --stacktrace -Pkotlin.native.toolchain.enabled=false
 
       # 一次性诊断，查清就删。已经排除的假设（都是被自己的实验推翻的，不是想当然）：
       # 1) "下载坏了" → rm -rf ~/.konan + --refresh-dependencies 重试，47 秒后同一个错；
