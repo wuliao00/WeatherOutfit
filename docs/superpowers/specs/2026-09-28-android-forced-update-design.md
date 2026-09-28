@@ -114,10 +114,17 @@ enum class InstallResult { Launched, PermissionMissing, Failed }
 }
 ```
 
-必填：`versionCode`、`versionName`、`minSupportedVersionCode`、`apkUrl`、`sha256`。
-可选：`sizeBytes`（缺失则进度条走不确定态）、`notes`（缺失则卡片不显示说明段）。
+必填：`versionCode`、`versionName`、`minSupportedVersionCode`、`apkUrl`。
+可选：`sha256`（缺失则跳过校验，见下）、`sizeBytes`（缺失则进度条走不确定态）、`notes`（缺失则卡片不显示说明段）。
 
-**解析口径（写死，不留歧义）**：任一必填字段缺失、类型不符、`sha256` 不是 64 位十六进制 ⇒ 整份清单判**无效** ⇒ `Unreachable`。未知字段忽略（`ignoreUnknownKeys`）。理由：宁可不提示，也不能拿半份清单去拦人。
+**`sha256` 为什么改成可选（写计划时发现的时序死结）**：清单由人在提版本号时手写，而那一刻 APK 还不存在、
+哈希无从得知；若把 `sha256` 定为必填，就只能先填一个假哈希（校验必失败）或者让 CI 回写清单
+（CI 就没有 Gitee 写权限）。所以：清单里**声明了** `sha256` 就强制校验、不一致即判失败；
+**没声明**则跳过校验并照常安装。CI 首次成功产出包之后，由我把真哈希补进这份清单
+（此后每次发布都要更新它，§8 第 2 步会比对声明值与实际包）。
+
+**解析口径（写死，不留歧义）**：任一必填字段缺失、类型不符、`sha256` 声明了但不是 64 位十六进制 ⇒ 整份清单判**无效** ⇒ `Unreachable`。未知字段忽略（`ignoreUnknownKeys`）。理由：宁可不提示，也不能拿半份清单去拦人。
+
 
 ---
 
@@ -175,7 +182,9 @@ UI 状态：`Idle → Checking → (Hidden | OptionalCard | Gate) → Downloadin
 
 - `UpdateDecisionTest`：表驱动 ≥ 10 例，覆盖 §6 全部分支，含"当前版本高于清单""`min > latest` 错配""HEAD 探不到包 ⇒ 降级 Optional"。
 - `UpdateManifestTest`：合法 / 缺必填 / 类型错 / `sha256` 非 64 位十六进制 / 含未知字段。
-- **仓库自校验用例**：读真实 `update.json` 文件，断言必填字段齐全、`sha256` 格式正确、`apkUrl` 的 tag 段与 `versionName` 一致。这条专门拦"改了版本号忘了改清单"。
+- **仓库自校验用例**：读真实 `update.json` 文件，断言必填字段齐全、`sha256` 若声明则格式正确、`apkUrl` 的 tag 段与 `versionName` 一致。这条专门拦"改了版本号忘了改清单"。
+  实现位置是 **app 的 JVM 测试**而不是 commonTest —— commonTest 没有读文件的 API，且 iOS 模拟器沙箱里也没有仓库工作树；从测试工作目录向上找到含 `settings.gradle.kts` 的根目录再读。
+
 
 **真机（本机 Windows 测不了的部分，vivo V2156A 与 OPPO PLB110 各一遍）**
 
