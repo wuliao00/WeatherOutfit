@@ -147,12 +147,29 @@ class UpdateViewModel(
     private var lastManifest: UpdateManifest? = null
 
     /**
-     * 这次冷启动**屏幕上真的挂着门禁**吗。
+     * 这次冷启动**已经挂上过门禁**吗 —— 一旦为真就不再回 false（"只进不出"）。
      *
      * 跟着显示出来的状态走，而不是跟着 verdict 走：判定说要拦却没给清单时 UI 是 Hidden，
      * 那时装成 true 会让后面每个状态都冒充门禁（连返回键都跟着吞，用户彻底出不去）。
+     *
+     * 为什么不跟着"当前状态是不是 Gate"走（评审给的那版修法）：下载一开始状态就变成
+     * `Downloading`，那一刻 `is Gate` 恒 false ⇒ `Downloading/Failed` 的 `forced` 全丢，
+     * 正好复现"下载中途按一次返回就绕过门禁"。所以这里必须是**粘滞**的。
+     *
+     * 粘滞的另一半代价由 [runCheck] 里那道"禁止 Gate→Hidden"补掉：否则门禁挂着时点一次
+     * 设置页「检查更新」而恰好断网 ⇒ Unreachable ⇒ Hidden ⇒ **一次点击解除门禁**。
+     * 注意这两条不矛盾：被禁掉的是"检查失败后卡片还不在"，不是"Failed 吞返回键" ——
+     * 失败态仍然放人走（计划 Goal：任何失败都能退出而不锁死用户），门禁下次冷启动会再拦一次。
      */
     private var forcedThisLaunch = false
+
+    /**
+     * 门禁第一次出现时那份清单。
+     *
+     * 单独存一份而不是复用 [lastManifest]：`lastManifest` 跟着每次检查走，
+     * 一次 Unreachable 就把它覆盖成 null，那时"把门禁重新挂上"就没有 apkUrl 可用了。
+     */
+    private var forcedManifest: UpdateManifest? = null
 
     /** 正在跑的那一次下载。存在的唯一理由：下载中再点一次不许并发起第二条 */
     private var downloadJob: Job? = null
@@ -178,6 +195,12 @@ class UpdateViewModel(
 
     private fun runCheck() {
         scope.launch {
+            // 平台不支持 ⇒ 连问都不问（评审 Important「iOS 白打一次网络」）。
+            // 这一行原来在 checker.check 之后，于是 iPhone 每次冷启动都真发一次 GET
+            // （外加可能的 HEAD）去打 Gitee，而这一端**永远**不显示任何更新入口。
+            // 副作用：iOS 上 lastVerdict 保持 null（"还没查过"）—— 这是更诚实的取值，
+            // 而它唯一的读者（Task 9 设置页那一行）本来就该被 supported 挡在门外。
+            if (!gateway.supported) return@launch
             // fail-open：这条路径在冷启动上。判定层自己已经把"读不到/看不懂"收敛成
             // Unreachable 了，但 UpdateChecker 是个接口 —— 将来任何一个实现抛出未捕获异常，
             // 容器那层的 SupervisorJob 不吞它，表现就是**开屏崩 App**。
@@ -191,9 +214,19 @@ class UpdateViewModel(
             }
             lastManifest = decision.manifest
             _lastVerdict.value = decision.verdict
-            if (!gateway.supported) return@launch
-            _state.value = newStateFor(decision)
-            forcedThisLaunch = _state.value is UpdateUiState.Gate
+            val next = newStateFor(decision)
+            // 门禁"只进不出"：这次冷启动挂过门禁之后，一次失败的检查不许把它解除（Hidden）。
+            // 症状原本是"门禁挂着时点一下设置页「检查更新」，恰好断网 ⇒ 门禁消失"，
+            // 等于用户随手一点就绕过了这个功能存在的全部意义。
+            _state.value = if (forcedThisLaunch && next is UpdateUiState.Hidden) {
+                forcedManifest?.let { UpdateUiState.Gate(it) } ?: next
+            } else {
+                next
+            }
+            (_state.value as? UpdateUiState.Gate)?.let {
+                forcedThisLaunch = true
+                forcedManifest = it.manifest
+            }
         }
     }
 

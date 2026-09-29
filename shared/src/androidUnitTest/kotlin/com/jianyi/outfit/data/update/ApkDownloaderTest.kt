@@ -27,6 +27,11 @@ import kotlin.test.assertTrue
  * 所以"发不发 Progress"必须有一条能变红的锁，而锁只能钉在它能被观察到的地方 ——
  * [copyWithProgress] 不依赖 HTTP，`emit` 是它的参数，把循环里那行 emit 删掉这条文件就红。
  *
+ * 评审补的半条：**光锁复制循环不够**。`onProgress = { emit(it) }` 那一行在 flow 组装里，
+ * 把它换成空 lambda 时这里 185 条仍然全绿 —— 因为没人构造过下载器。
+ * 于是判定与组装被抽成 `downloadEvents`，端到端那几条（含跨层到进度条的）在
+ * [ApkDownloadFlowTest]，这个文件只留纯函数与复制循环本身。
+ *
  * ## 为什么 `sha256Of` 也在这儿测
  * 解析器 `UpdateManifestParser.isSha256Hex()` 只认 64 位**小写**十六进制。
  * 我们的哈希串要是写成大写，症状不是"校验失败"而是**整份清单被拒 → 判 Unreachable →
@@ -113,6 +118,25 @@ class ApkDownloaderTest {
         assertFalse(shouldRefuseDownload(total = null, free = -1L), "没有 sizeBytes 就跳过前置检查，不是一律拒绝")
     }
 
+    /**
+     * `total` 大到离谱时不许把这道闸自己关掉（评审 Minor：`total * 5` 会溢出）。
+     *
+     * 解析器对 `sizeBytes` 只夹住"必须为正"（`isSane()` 没有上限），所以 1e18 那种量级的
+     * 笔误是能进到这里来的。过去判据是 `free * 2 < total * 5`，而 `total * 5` 溢出成
+     * **负数** ⇒ 条件恒 false ⇒ "永远不拦" —— 一道为了省流量而设的闸被一个笔误静音了。
+     * 现在按 Gitee 的单附件配额（spec §3.7：100MB）夹住 `total`，两边的乘积都在 Long 之内。
+     */
+    @Test fun an_absurd_declared_size_cannot_disable_the_space_precheck() {
+        assertTrue(
+            shouldRefuseDownload(total = Long.MAX_VALUE, free = 100_000_000L),
+            "离谱的声明值溢出成\"不拦\"，这道闸等于没有"
+        )
+        assertTrue(shouldRefuseDownload(total = 4_000_000_000_000_000_000L, free = 0L))
+        // 余量真的够（配额 100MB 的 2.5 倍是 250MB）时仍然放行：加顶不是一律拒绝
+        assertFalse(shouldRefuseDownload(total = Long.MAX_VALUE, free = 300_000_000L))
+        assertFalse(shouldRefuseDownload(total = Long.MAX_VALUE, free = 10L * 1024L * 1024L * 1024L))
+    }
+
     // ---- 文件名 ----
 
     @Test fun target_name_includes_version() {
@@ -170,6 +194,11 @@ class ApkDownloaderTest {
      * 而那种断开可能只是通道正常结束、不抛异常。不拦的下一步就是把半截包当成功：
      * 清单声明了 sha256 时会被校验拦住（运气好），没声明时安装页直接报"解析软件包时出现问题"，
      * 而我们自己的日志写着"下载成功"。
+     *
+     * `declaredSize` 这个参数在评审后换了含义：它现在传的是**这次下载的期望长度**
+     * （`Content-Length ?: sizeBytes`，见 `downloadEvents`），不再是"清单手写的那一份"。
+     * 于是生产 `update.json` 那种两个字段都没填的清单也有得判 —— 真正端到端的那条锁在
+     * [ApkDownloadFlowTest]，这里只是判据自身的边界。
      */
     @Test fun a_short_body_with_declared_size_is_not_complete() {
         assertFalse(isBodyComplete(written = 26_000_000L, declaredSize = 58_000_000L), "半截响应不许算下完")
@@ -177,7 +206,7 @@ class ApkDownloaderTest {
         // 0 字节永远不算完整：它是"通道立刻 EOF"的返回值，不是一个 APK
         assertFalse(isBodyComplete(written = 0L, declaredSize = null), "0 字节不是一个 APK")
         assertFalse(isBodyComplete(written = 0L, declaredSize = 100L), "0 字节不是一个 APK")
-        // 没有声明长度时无从比对，只要真收到过字节就算走完了
+        // 服务器与清单都没给长度时无从比对，只要真收到过字节就算走完了（残留风险见 T11）
         assertTrue(isBodyComplete(written = 1L, declaredSize = null))
     }
 

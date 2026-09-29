@@ -69,10 +69,18 @@ fun gateIsForced(state: UpdateUiState): Boolean = when (state) {
  * 否则这个功能自己把它要保护的"任何失败都能退出"给反噬了。
  * Task 8 的返回键判据应当复用这个函数：两处各写一份 when 的结果，
  * 就是"返回键能退、卡片还按着你"或者"卡片放开了、返回键还在吞"。
+ *
+ * `hasUrl` 这一维是评审补的：门禁下载中这一档摆的**只有**「复制下载链接」，
+ * 所以连地址都没有时，按住整页就等于"一块吃点击、零按钮"的膜 —— 用户只能杀进程。
+ * 那一态此刻没有任何可完成的动作，放开页面才是"不许锁死用户"的写法。
+ *
+ * 默认值是 true，因为返回键那一侧（`shouldBlockBack`）**只看状态**：
+ * 有没有地址是卡片渲染层面的信息，而返回键放开就意味着"这一档可以跳过"，
+ * 那不是这一层该做的决定。
  */
-fun gateHoldsPage(state: UpdateUiState): Boolean = when (state) {
+fun gateHoldsPage(state: UpdateUiState, hasUrl: Boolean = true): Boolean = when (state) {
     is UpdateUiState.Gate -> true
-    is UpdateUiState.Downloading -> state.forced
+    is UpdateUiState.Downloading -> state.forced && hasUrl
     else -> false
 }
 
@@ -117,19 +125,32 @@ fun gateDownloadView(state: UpdateUiState): DownloadView? = when (state) {
  * 摆哪几颗按钮。三条规矩都各有一条用例钉着：
  * 门禁那一档永远不给 Later；下载中不给"立即更新"（VM 里有 downloadJob 防重入，
  * 摆出来是颗空按钮）；非强制的失败只给重试，因为那一档本来就不按住整页。
+ *
+ * ## 为什么 `hasUrl` 是参数而不是调用方的 `.filterNot`
+ * 评审抓到的正是这个错位：这一层曾经只管"按状态该有哪几颗"，
+ * 而"没有地址就别摆复制链接"那半条过滤写在 `UpdateGateLayer` 里。
+ * 于是**用例断言的列表和 UI 画的列表是两个东西** ——
+ * `apkUrl` 为空且处于 `Downloading(forced=true)` 时，遮罩按住整页而按钮一颗不剩
+ * （那一档本来就只有「复制下载链接」这一颗）。把过滤收回参数里，
+ * 那条 sweep 用例跑的就是画出来的那一份，漂移不再可能。
  */
-fun gateActions(state: UpdateUiState): List<GateAction> = when (state) {
+fun gateActions(state: UpdateUiState, hasUrl: Boolean): List<GateAction> = when (state) {
     is UpdateUiState.Gate -> listOf(GateAction.Update)
     is UpdateUiState.OptionalCard -> listOf(GateAction.Update, GateAction.Later)
 
     // 门禁下载中：唯一给的是复制链接 —— 24MB 的路上不能一个出口都没有，
     // 而复制链接不关闭任何东西，所以它不违反"门禁没有关闭入口"。
-    is UpdateUiState.Downloading -> if (state.forced) listOf(GateAction.CopyLink) else emptyList()
+    // 没有地址时一颗都不给：那种情况下 gateHoldsPage 也必须跟着放开（见那个函数）。
+    is UpdateUiState.Downloading -> when {
+        !state.forced -> emptyList()
+        hasUrl -> listOf(GateAction.CopyLink)
+        else -> emptyList()
+    }
 
-    is UpdateUiState.Failed -> if (state.forced) {
-        listOf(GateAction.Retry, GateAction.CopyLink)
-    } else {
-        listOf(GateAction.Retry)
+    is UpdateUiState.Failed -> when {
+        !state.forced -> listOf(GateAction.Retry)
+        hasUrl -> listOf(GateAction.Retry, GateAction.CopyLink)
+        else -> listOf(GateAction.Retry)
     }
 
     UpdateUiState.Hidden -> emptyList()
@@ -149,8 +170,15 @@ object UpdateCopy {
         return (done.toFloat() / total.toFloat()).coerceIn(0f, 1f)
     }
 
-    /** "11.4 MB / 23.0 MB"；没有 total 时只说已下多少，绝不编一个百分比出来 */
-    fun sizeText(done: Long, total: Long?): String = if (total == null) {
+    /**
+     * "11.4 MB / 23.0 MB"；没有 total 时只说已下多少，绝不编一个百分比出来。
+     *
+     * `total <= 0` 与 `total == null` 走同一句话（评审 Minor）：清单把 sizeBytes 写成 0
+     * 也是一种"不知道总量"，而 [progressOf] 早就把它当不知道（返回 -1 走不确定态）。
+     * 两边不一致的后果是那根条不涨、文字却印"11.4 MB / 0.0 MB" —— 一句话自己否认自己，
+     * 用户只会认为程序卡死。
+     */
+    fun sizeText(done: Long, total: Long?): String = if (total == null || total <= 0L) {
         if (done <= 0L) "" else "已下载 ${mb(done)}"
     } else {
         "${mb(done)} / ${mb(total)}"

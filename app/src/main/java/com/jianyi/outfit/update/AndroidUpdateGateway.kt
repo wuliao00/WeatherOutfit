@@ -9,6 +9,7 @@ import android.util.Log
 import androidx.core.content.FileProvider
 import com.jianyi.outfit.data.AppUpdateGateway
 import com.jianyi.outfit.data.InstallResult
+import com.jianyi.outfit.data.update.UPDATE_DIR_NAME
 import java.io.File
 
 /**
@@ -92,8 +93,19 @@ class AndroidUpdateGateway(private val context: Context) : AppUpdateGateway {
      * （ACTION_INSTALL_PACKAGE 自 API 30 起已废弃，仓库的规矩是不引入废弃 API，故不用它。）
      */
     override fun install(apkPath: String): InstallResult {
+        // 层间契约：先验路径，再谈权限。理由是这条 path 来自另一个模块的另一层
+        // （shared 的 ApkDownloader 发 DownloadEvent.Success(path)），中间没有任何编译器能
+        // 保证它真的是下载器落盘的那个文件。守卫放在这里是因为只有本类知道 FileProvider 的 root；
+        // 越界路径必须回 Failed 而不是让 getUriForFile 抛出去被折成"请清理手机存储"那句误报文案。
+        precheckInstallPath(apkPath, context.cacheDir)?.let { rejection ->
+            Log.w(
+                TAG,
+                "安装被路径守卫拒绝：$apkPath 不在 ${File(context.cacheDir, UPDATE_DIR_NAME).absolutePath} 之下" +
+                    "（成因按 $rejection 处理，没有交给 FileProvider，也就没有 IllegalArgumentException）"
+            )
+            return rejection
+        }
         val file = File(apkPath)
-        if (!file.exists()) return InstallResult.Failed
         if (!hasInstallPermission()) return InstallResult.PermissionMissing
         return try {
             val uri = FileProvider.getUriForFile(

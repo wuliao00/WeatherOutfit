@@ -79,6 +79,24 @@ class UpdateCopyTest {
     }
 
     /**
+     * `total == 0` 与"没有 total"必须是同一句话（评审 Minor）。
+     *
+     * 清单把 sizeBytes 写成 0（或被解析器放过的坏值）也是一种"不知道总量"，
+     * 而 [UpdateCopy.progressOf] 早就把它当不知道（返回 -1 走不确定态）。
+     * 两边不一致的后果是那根条不涨、文字却印"11.4 MB / 0.0 MB" —— 一句话自己否认自己，
+     * 用户只会认为程序卡死。
+     */
+    @Test fun a_zero_total_is_unknown_not_zero_mb() {
+        assertEquals("已下载 11.4 MB", UpdateCopy.sizeText(11_953_920L, 0L), "0 当分母印出来的是一句自相矛盾的话")
+        assertEquals("", UpdateCopy.sizeText(0L, 0L))
+        assertEquals(
+            -1f,
+            UpdateCopy.progressOf(11_953_920L, 0L),
+            "sizeText 与 progressOf 对 total=0 的口径必须一致：一个走未知、一个走 0%"
+        )
+    }
+
+    /**
      * 一条进度都没收到时，关于大小唯一能说的一句是"这个包有多大"。
      *
      * 计划原本在这里写的是 `sizeText(done ?: 0L, total)`，那会渲染成
@@ -173,34 +191,76 @@ class UpdateCopyTest {
      * 这条是 Task 6 的变异目标：把 Gate 分支也接上关闭入口，红的就是这一条，
      * 而 VM 的 `gate_cannot_be_dismissed` 仍然全绿 —— 因为 VM 那边只是"关掉时不动作"，
      * UI 若真摆出那颗按钮，症状是**用户点了没反应**：门禁的"不可跳过"退化成一次静默失效。
+     *
+     * 两种 `hasUrl` 都要跑：按钮集合现在由这两个输入共同决定，而"过滤后的那一份
+     * 才是画出来的"正是评审抓到的错位。
      */
     @Test fun gate_like_states_never_offer_a_way_to_close() {
         for (state in GATE_LIKE_STATES) {
-            assertFalse(
-                gateActions(state).contains(GateAction.Later),
-                "${state::class.simpleName} 是门禁那一套，摆出关闭入口就等于没有门禁：${gateActions(state)}"
-            )
+            for (hasUrl in listOf(true, false)) {
+                val actions = gateActions(state, hasUrl)
+                assertFalse(
+                    actions.contains(GateAction.Later),
+                    "${state::class.simpleName}(hasUrl=$hasUrl) 是门禁那一套，摆出关闭入口就等于没有门禁：$actions"
+                )
+            }
         }
     }
 
-    /** 反方向：门禁上也不能一块按不动的玻璃 —— 至少得有一个能点的动作 */
+    /**
+     * 反方向的两半，合起来才是"门禁不会变成砖"：
+     * 1. 有地址时（这是唯一能走到 Downloading 的情形，下载本来就需要 apkUrl），
+     *    门禁那一套的每个状态都得有至少一颗能点的按钮；
+     * 2. 没地址时，一颗按钮都摆不出来的那个状态，就不许同时把整页按住。
+     *
+     * 第 2 半是评审 Important 的落点：过去这里断言的是未过滤的列表，而 UI 画的是过滤后的
+     * （`gateActions(state).filterNot { it == CopyLink && url == null }`），两份列表不一致 ⇒
+     * `Downloading(forced=true)` 只剩「复制下载链接」这一颗，一旦没有地址就是
+     * "遮罩按住整页 + 零按钮"，用户只能杀进程。现在过滤在判据里，这条跑的就是画出来的那份。
+     */
     @Test fun gate_like_states_always_offer_something_to_press() {
         for (state in GATE_LIKE_STATES) {
-            assertTrue(gateActions(state).isNotEmpty(), "$state 一个按钮都没有，用户只能杀进程")
+            assertTrue(
+                gateActions(state, hasUrl = true).isNotEmpty(),
+                "$state 一个按钮都没有，用户只能杀进程"
+            )
+            val drawn = gateActions(state, hasUrl = false)
+            if (drawn.isEmpty()) {
+                assertFalse(
+                    gateHoldsPage(state, hasUrl = false),
+                    "${state::class.simpleName} 在没有下载地址时既按住整页又零按钮 —— 只能杀进程"
+                )
+            }
         }
+    }
+
+    /** 遮罩与按钮这两份判据必须一起改：有地址照旧按住，没地址就放开 */
+    @Test fun a_forced_download_holds_the_page_only_when_it_can_offer_the_link() {
+        val forcedDownloading = UpdateUiState.Downloading(MANIFEST, done = null, total = TOTAL, forced = true)
+        assertTrue(gateHoldsPage(forcedDownloading, hasUrl = true))
+        assertFalse(gateHoldsPage(forcedDownloading, hasUrl = false))
+        // 返回键那一侧（Task 8）只看状态，默认 hasUrl=true，判据不漂
+        assertTrue(gateHoldsPage(forcedDownloading))
+        assertEquals(listOf(GateAction.CopyLink), gateActions(forcedDownloading, hasUrl = true))
+        assertEquals(emptyList(), gateActions(forcedDownloading, hasUrl = false))
     }
 
     @Test fun optional_card_offers_update_then_skip() {
         assertEquals(
             listOf(GateAction.Update, GateAction.Later),
-            gateActions(UpdateUiState.OptionalCard(MANIFEST))
+            gateActions(UpdateUiState.OptionalCard(MANIFEST), hasUrl = true)
         )
     }
 
     @Test fun failed_gate_offers_retry_and_the_link_escape() {
         assertEquals(
             listOf(GateAction.Retry, GateAction.CopyLink),
-            gateActions(UpdateUiState.Failed(MANIFEST, DownloadFailure.Network, forced = true))
+            gateActions(UpdateUiState.Failed(MANIFEST, DownloadFailure.Network, forced = true), hasUrl = true)
+        )
+        // 没有地址时"重试"仍然要给：那一态本来就不按住整页，用户可以走开也可以再试一次
+        assertEquals(
+            listOf(GateAction.Retry),
+            gateActions(UpdateUiState.Failed(MANIFEST, DownloadFailure.Network, forced = true), hasUrl = false)
         )
     }
 
@@ -214,7 +274,7 @@ class UpdateCopyTest {
     @Test fun non_forced_failure_offers_retry_only() {
         assertEquals(
             listOf(GateAction.Retry),
-            gateActions(UpdateUiState.Failed(MANIFEST, DownloadFailure.Network, forced = false))
+            gateActions(UpdateUiState.Failed(MANIFEST, DownloadFailure.Network, forced = false), hasUrl = true)
         )
     }
 
@@ -225,16 +285,16 @@ class UpdateCopyTest {
     @Test fun a_running_download_offers_no_start_button() {
         assertEquals(
             emptyList(),
-            gateActions(UpdateUiState.Downloading(MANIFEST, done = null, total = null, forced = false))
+            gateActions(UpdateUiState.Downloading(MANIFEST, done = null, total = null, forced = false), hasUrl = true)
         )
         assertEquals(
             listOf(GateAction.CopyLink),
-            gateActions(UpdateUiState.Downloading(MANIFEST, done = null, total = TOTAL, forced = true))
+            gateActions(UpdateUiState.Downloading(MANIFEST, done = null, total = TOTAL, forced = true), hasUrl = true)
         )
     }
 
     @Test fun hidden_state_gives_the_layer_nothing_to_draw() {
-        assertEquals(emptyList(), gateActions(UpdateUiState.Hidden))
+        assertEquals(emptyList(), gateActions(UpdateUiState.Hidden, hasUrl = true))
         assertFalse(gateHoldsPage(UpdateUiState.Hidden))
         assertNull(gateDownloadView(UpdateUiState.Hidden))
         assertNull(gateManifest(UpdateUiState.Hidden))

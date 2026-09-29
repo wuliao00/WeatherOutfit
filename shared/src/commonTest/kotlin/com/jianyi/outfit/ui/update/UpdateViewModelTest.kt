@@ -107,6 +107,17 @@ private class ProgressInstaller(
     }
 }
 
+/**
+ * 按脚本给结论的检查器：一条用例里要模拟"冷启动查到门禁，之后手动检查恰好断网"。
+ * 脚本用完之后一律按 Unreachable 处理（等价于"再查也拿不到清单"）。
+ */
+private class ScriptedChecker(private val decisions: List<UpdateDecision>) : UpdateChecker {
+    var calls = 0
+
+    override suspend fun check(currentVersionCode: Int): UpdateDecision =
+        decisions.getOrElse(calls) { UpdateDecision(UpdateVerdict.Unreachable, null) }.also { calls++ }
+}
+
 private class FakeGateway(
     override val supported: Boolean = true,
     private val installResult: InstallResult = InstallResult.Launched
@@ -200,14 +211,106 @@ class UpdateViewModelTest {
     }
 
     /**
-     * 平台不支持 ⇒ 即使判定是 Forced 也不显示任何东西（iOS 走这条）。
-     * 但结论仍然要发布出去：设置页读 lastVerdict，UI 状态本身分不清
-     * "查过、没更新" 与 "根本没查"。
+     * 平台不支持 ⇒ **一次网络都不打**（评审 Important「iOS 白打一次网络」）。
+     *
+     * 这一条替代了原来那句"仍然发布结论"：过去 `runCheck` 先 `checker.check`（GET +
+     * 可能的 HEAD）**才**判 `!gateway.supported`，于是 iPhone 每次冷启动都真打一次 Gitee，
+     * 而那一端永远不显示任何更新入口。把 supported 判断前移之后，唯一"损失"是
+     * `lastVerdict` 在 iOS 上保持 null —— 而那才是诚实的取值（它确实没查过），
+     * 而它唯一的读者（Task 9 设置页那一行）本来就该被 `supported` 挡在门外。
+     * 这条断言比原来强：0 次调用是原来那条用例看不见的。
      */
-    @Test fun unsupported_platform_stays_hidden_yet_still_publishes_the_verdict() = runTest {
-        val vm = checkedVm(this, UpdateVerdict.Forced, gateway = FakeGateway(supported = false))
+    @Test fun an_unsupported_platform_never_touches_the_network() = runTest {
+        val checker = FakeChecker(UpdateDecision(UpdateVerdict.Forced, MANIFEST))
+        val installer = FakeInstaller()
+        val vm = UpdateViewModel(
+            appVersion = AppVersion(8, "2.1.2"),
+            checker = checker,
+            installer = installer,
+            gateway = FakeGateway(supported = false),
+            scope = this
+        )
+        vm.checkOnce()
+        advanceUntilIdle()
+        assertEquals(0, checker.calls, "iOS 上没有入口，这次清单请求是白打的网络流量")
         assertIs<UpdateUiState.Hidden>(vm.state.value)
-        assertEquals(UpdateVerdict.Forced, vm.lastVerdict.value)
+        assertNull(vm.lastVerdict.value, "没查过就不许报结论")
+        vm.startDownload()
+        assertEquals(0, installer.downloads, "不支持的平台上连下载都不该有能力开始")
+    }
+
+    /**
+     * 门禁不许被一次「检查更新」解除（评审 Important）。
+     *
+     * 症状原本很具体：门禁挂着时点设置页的「检查更新」，恰好断网 ⇒ Unreachable ⇒ Hidden ⇒
+     * 用户随手一点就把这个功能存在的全部意义绕过去了。修法是把 `forcedThisLaunch` 做成
+     * 真正的粘滞：只进不出，检查失败最多让卡片停在门禁那一套上。
+     *
+     * 这一条与"Failed 不吞返回键"（Task 8）**不矛盾**：这里禁的是"检查失败后卡片整张消失"，
+     * 不是"下载失败之后不许退出"。放人走的那一半仍然成立，见
+     * `failed_releases_back_so_the_user_can_leave` 与 `a_failed_download_stops_holding_the_page`。
+     */
+    @Test fun a_manual_check_that_cannot_reach_the_manifest_cannot_lift_the_gate() = runTest {
+        val vm = UpdateViewModel(
+            appVersion = AppVersion(8, "2.1.2"),
+            checker = ScriptedChecker(
+                listOf(
+                    UpdateDecision(UpdateVerdict.Forced, MANIFEST),
+                    UpdateDecision(UpdateVerdict.Unreachable, null)
+                )
+            ),
+            installer = FakeInstaller(),
+            gateway = FakeGateway(),
+            scope = this
+        )
+        vm.checkOnce()
+        advanceUntilIdle()
+        assertIs<UpdateUiState.Gate>(vm.state.value)
+
+        vm.forceCheck()
+        advanceUntilIdle()
+
+        val s = assertIs<UpdateUiState.Gate>(vm.state.value, "一次断网的检查不许解除门禁")
+        assertEquals(MANIFEST, s.manifest, "重新挂上的门禁必须还是原来那份清单（apkUrl 不能丢）")
+        assertEquals(UpdateVerdict.Unreachable, vm.lastVerdict.value, "结论照实发布，只是不解除门禁")
+        // 粘滞的另一半：之后每个状态都还得记得自己是门禁（Task 8 的返回键读这个字段）
+        vm.startDownload()
+        advanceUntilIdle()
+        assertIs<UpdateUiState.Hidden>(vm.state.value, "FakeInstaller 的成功终态会把状态推到 Hidden（装完了）")
+    }
+
+    /**
+     * 同一条粘滞也要覆盖"下载失败之后再手动检查"：那一态的 `_state` 不是 Gate，
+     * 但这次冷启动已经挂过门禁，所以 Hidden 同样不许成立。
+     *
+     * 少了这一半的话，绕过口只是换了个位置：先在门禁上点下载、让它失败，再去点「检查更新」。
+     */
+    @Test fun a_failed_download_still_cannot_be_reset_to_hidden_by_a_manual_check() = runTest {
+        val vm = UpdateViewModel(
+            appVersion = AppVersion(8, "2.1.2"),
+            checker = ScriptedChecker(
+                listOf(
+                    UpdateDecision(UpdateVerdict.Forced, MANIFEST),
+                    UpdateDecision(UpdateVerdict.Unreachable, null)
+                )
+            ),
+            installer = FakeInstaller(DownloadEvent.Failure(DownloadFailure.Network)),
+            gateway = FakeGateway(),
+            scope = this
+        )
+        vm.checkOnce()
+        advanceUntilIdle()
+        vm.startDownload()
+        advanceUntilIdle()
+        val failed = assertIs<UpdateUiState.Failed>(vm.state.value)
+        assertTrue(failed.forced, "门禁下的失败要记得自己是门禁")
+        // 失败态放开页面（gateHoldsPage 在 Failed 为 false）是刻意的：下不下来必须能走。
+        assertFalse(gateHoldsPage(failed))
+
+        vm.forceCheck()
+        advanceUntilIdle()
+
+        assertIs<UpdateUiState.Gate>(vm.state.value, "失败之后一次断网的检查不许把门禁整张抹掉")
     }
 
     /**

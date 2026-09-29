@@ -94,6 +94,10 @@ android {
 tasks.withType<AbstractTestTask>().configureEach {
     if (name == "testDebugUnitTest") {
         inputs.file(rootProject.file("update.json"))
+        // 同一个理由：UpdateInstallPathTest 读这份 xml 来比对 FileProvider 的 root 与
+        // shared 的 UPDATE_DIR_NAME。它是源码目录下的资源文件，不是这条任务的声明输入，
+        // 只改这一行 xml 时任务会判 UP-TO-DATE —— 而"配置与代码漂移"正是这条用例要抓的。
+        inputs.file(project.file("src/main/res/xml/file_paths.xml"))
     }
 }
 

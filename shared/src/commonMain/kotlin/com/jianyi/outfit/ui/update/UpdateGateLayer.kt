@@ -39,11 +39,16 @@ import kotlinx.coroutines.launch
 
 /**
  * 更新门禁 / 可跳过提示那一层。挂在 RootScreen 的 Box 里、`content()` **之后**，
- * 所以它永远盖在所有页面与弹层之上。
+ * 所以它盖在活动导航栈里的所有页面与弹层之上。
+ *
+ * **一句诚实的边界**（评审记录，别把这层的能力说满）：Compose 的 `Dialog`/`Popup` 是**独立的
+ * window**，不属于本层的 composition 树，所以这一层的遮罩盖不住它们。今天这条链上没有 Dialog
+ * 就够了 —— 门禁仍然在 Activity 这一层拦着返回键与点击，Dialog 挡不住的是"看得见"，
+ * 不是"绕得过去"。以后若给更新流程加 Dialog，要按 window 层级重新评估这句话。
  *
  * 三条硬规矩：
  * 1. **门禁不提供任何关闭入口**。按钮集合由 [gateActions] 决定并被用例钉住；
- *    返回键拦截在 Task 8，这一层不"顺手"加一颗关闭按钮。
+ *    返回键拦截在 Task 8（判据复用 [gateHoldsPage]，两处不许各写一份），这一层不"顺手"加一颗关闭按钮。
  * 2. **整页都是半透明玻璃**：卡片走 `GlassSurface`、按钮走现成的 `GlassPill`。
  *    仓库里没有 `GlassButton`，`GlassShapes` 里也没有 `pill` 那一档（只有
  *    card/inner/chip/bar/sheet/circle），所以这里既不自造第二颗按钮、也不新增形状常量。
@@ -73,10 +78,13 @@ fun UpdateGateLayer(vm: UpdateViewModel) {
     LaunchedEffect(Unit) { vm.checkOnce() }
 
     val manifest = gateManifest(state) ?: return
-    val holdsPage = gateHoldsPage(state)
     val url = vm.apkUrl()
-    // 没有地址就不摆"复制链接"：按下去复制出一个空串，等于把用户丢进浏览器里撞 404
-    val actions = gateActions(state).filterNot { it == GateAction.CopyLink && url == null }
+    // 没有地址就不摆"复制链接"：按下去复制出一个空串，等于把用户丢进浏览器里撞 404。
+    // 这条过滤**必须在纯函数里**（gateActions 的 hasUrl 参数）而不是在这里 .filterNot：
+    // 那样用例断言的列表和这里画的列表是两份，"按住整页 + 零按钮"就藏在接缝里。
+    val hasUrl = url != null
+    val actions = gateActions(state, hasUrl)
+    val holdsPage = gateHoldsPage(state, hasUrl)
     val download = gateDownloadView(state)
 
     Box(
