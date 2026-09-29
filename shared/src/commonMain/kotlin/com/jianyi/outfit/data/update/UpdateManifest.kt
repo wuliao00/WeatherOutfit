@@ -3,19 +3,26 @@ package com.jianyi.outfit.data.update
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.jsonObject
 
 /**
  * 清单解析配置。**刻意不复用** [com.jianyi.outfit.data.remote.weatherJson]。
  *
  * 天气那边开了 isLenient + coerceInputValues，因为那个接口多返回字段、
  * 数字时而是字符串 —— 为一个字段让整次查询失败不值得。
- * 同一套宽松用在这里会造出**永久静默失效**：coerceInputValues 会把
- * "versionCode":"9" 或 null 折成 0，于是 current >= 0 恒成立 ⇒ 判 UpToDate，
- * 用户再也收不到更新而没有任何异常。清单是要决定"拦不拦人"的，
- * 它对格式的容忍度必须和天气数据相反。
+ * 同一套宽松用在这里会造出**永久静默失效**，而且要算准它具体怎么失效：
+ * coerceInputValues 的语义是"类型对不上、或者给了 null，就回退到默认值"，
+ * 于是 versionCode 缺失或写成 null 会被静静折成 0（Int 的回退值就是 0）
+ * ⇒ `current(8) >= 0` 恒成立 ⇒ 判 UpToDate ⇒
+ * 用户再也收不到更新，而测试、CI、日志全绿，没有任何异常。
+ * 清单是要决定"拦不拦人"的，它对格式的容忍度必须和天气数据相反。
+ *
+ * 说清一个反直觉的事实（本仓库实测）：**不开这两个开关并不等于拒掉带引号的数字**。
+ * kotlinx.serialization 的整型解码对 `"versionCode":"9"` 在严格模式下同样读出 9，
+ * 而 Json 的配置项里只有"更松"的开关，没有"更严"的开关能关掉这条宽容。
+ * 这不需要额外去堵：9 就是 9，"拦不拦人"的语义没有含糊，风险是零；
+ * 真正会静默要命的是 null/缺失变成 0，那由两道闸兜住 ——
+ * 不开 coerceInputValues（null 直接抛 ⇒ [UpdateManifestParser.parse] 返回 null），
+ * 以及 [UpdateManifestParser] 内部 `versionCode <= 0` 的语义闸。
  *
  * 只留 ignoreUnknownKeys：允许以后往清单里加字段而不打断老版本 App。
  */
@@ -47,38 +54,15 @@ object UpdateManifestParser {
 
     private const val SHA256_HEX_LENGTH = 64
 
-    /** 必须是 JSON 数字的字段：两个版本号决定"拦不拦人"，sizeBytes 决定进度条走哪种形态 */
-    private val numericFields = listOf("versionCode", "minSupportedVersionCode", "sizeBytes")
-
     /** 任何"读不到/看不懂"都收敛成 null，由调用方降级成 Unreachable —— 不抛异常 */
     fun parse(text: String?): UpdateManifest? {
         if (text.isNullOrBlank()) return null
         val manifest = try {
-            val root = updateJson.parseToJsonElement(text).jsonObject
-            if (!root.numericFieldsAreUnquoted()) return null
-            updateJson.decodeFromJsonElement(UpdateManifest.serializer(), root)
+            updateJson.decodeFromString(UpdateManifest.serializer(), text)
         } catch (e: Exception) {
             return null
         }
         return if (manifest.isSane()) manifest else null
-    }
-
-    /**
-     * 数字字段必须是**不带引号**的 JSON 数字。
-     *
-     * 这一道必须显式写：`Json { ignoreUnknownKeys = true }`（不开 isLenient、
-     * 不开 coerceInputValues）并不会拒掉 `"versionCode":"9"` —— kotlinx.serialization
-     * 的整型解码先取字符串字面量再本地 parse，实测严格模式下照样读出 9。
-     * 而 Json 配置里只有"更松"的开关，没有"更严"的开关可关这条宽容。
-     * 清单里唯一决定"拦不拦人"的就是这两个整数：写成字符串到底是 9 还是别的，
-     * 只有写清单的人知道，App 猜不出来 —— 所以含糊一律判无效，不判"能用就行"。
-     */
-    private fun JsonObject.numericFieldsAreUnquoted(): Boolean {
-        for (key in numericFields) {
-            val value = this[key] ?: continue // 缺失由解码那步按"必填字段缺失"处理
-            if (value !is JsonPrimitive || value.isString) return false
-        }
-        return true
     }
 
     /**
@@ -89,6 +73,12 @@ object UpdateManifestParser {
      * - 非 .apk：拿到的东西装不上，用户点了没反应；
      * - 哈希长度不对：下载永远校验失败，而失败原因看起来像包坏了；
      * - versionCode <= 0 或 sizeBytes 负数：一定是清单写错。
+     *
+     * 最后一条同时是"永久静默失效"的第二道闸：0 正是 coerceInputValues 会把
+     * null/缺失折出来的那个值（见 [updateJson] 的 KDoc），这里明确拒掉 0，
+     * 于是哪怕清单作者手滑写了 0，也不会退化成"所有人都收不到更新"。
+     * 与之相对，带引号的数字解成 9 是无害的，所以不做拒引号的结构校验 ——
+     * 那种手写 JSON 树校验既会误伤以后合法的新写法，又是长期维护负担。
      */
     private fun UpdateManifest.isSane(): Boolean {
         if (versionCode <= 0) return false
