@@ -15,6 +15,34 @@ val localProps = Properties().apply {
     if (f.exists()) f.inputStream().use { load(it) }
 }
 
+/**
+ * 仅 debug 生效的**清单地址覆盖**：`./gradlew :app:assembleDebug -PupdateManifestUrl=<url>`。
+ *
+ * ## 为什么需要这条路
+ * `update.json` 的 `minSupportedVersionCode` 保持 1（用户确认没有存量用户），于是生产数据上
+ * **硬门禁永远不会出现** —— 门禁那套 UI（全屏遮罩、返回键不放行、进度条、权限引导）
+ * 到合并时等于从未运行过。而它恰恰是这批改动里唯一"错了就把用户锁死"的一层。
+ *
+ * ## 为什么不干脆把 min 抬到 99 来"验收"
+ * 抬 min 会真的拦住每一个旧版设备，而此刻 v2.2.0 的附件还不存在（HEAD 探包失败 ⇒
+ * 判定层降级成"可跳过提示"）：既看不到门禁，又把一次本机演练变成线上事故。
+ * 所以正确形状是**把清单地址换成一份专门用来触发门禁的测试清单**（仓库根 `update.test.json`），
+ * 而不是改动那份会被真设备读到的清单。
+ *
+ * ## 为什么 release 侧必须是恒空串
+ * 覆盖只可能来自命令行属性，而发布包由 CI 从 tag 构建、不传这个属性；这里写死 `"\"\""`
+ * 是让"发布包里读不到覆盖"成为**代码形状**而不是约定。AppContainer 那边空即回退常量，
+ * 所以这条缝只有"有覆盖 / 没覆盖"两种状态，没有第三种"忘了清"。
+ *
+ * 先例就在本项目里：设置页允许用户自填天气接口地址，留空回退内置默认。
+ */
+val updateManifestUrlOverride = providers.gradleProperty("updateManifestUrl").orNull?.trim().orEmpty()
+
+// BuildConfig 的 String 字段要的是**带引号的源码字面量**，所以先把 URL 里的反斜杠与引号转义掉。
+// 不转义的话，含引号的属性值会生成一份语法错的 BuildConfig —— 报错点离原因很远。
+val updateManifestUrlOverrideLiteral =
+    "\"" + updateManifestUrlOverride.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
 android {
     namespace = "com.jianyi.outfit"
     compileSdk = 35
@@ -23,8 +51,11 @@ android {
         applicationId = "com.jianyi.outfit"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "2.1.2"
+        versionCode = 9
+        versionName = "2.2.0"
+        // 抬这两个值必须同时改仓库根 `update.json` 的 versionCode / versionName 与 apkUrl 的
+        // tag 段（三处一起改的理由见 README 发布手册第一节）。只改本文件不会有任何编译错，
+        // 表现是"所有人永远收不到更新"，唯一能把它变红的地方是 UpdateManifestFileTest。
 
         // 通过 BuildConfig 注入接口凭证，代码中统一使用 BuildConfig.WEATHER_API_ID / KEY
         buildConfigField(
@@ -55,6 +86,11 @@ android {
     }
 
     buildTypes {
+        // 清单地址覆盖只给 debug。两个 buildType 都要声明这个字段：AppContainer 在 src/main，
+        // 两端都要编得过，少一处就是 Unresolved reference。
+        getByName("debug") {
+            buildConfigField("String", "UPDATE_MANIFEST_URL_OVERRIDE", updateManifestUrlOverrideLiteral)
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
@@ -63,6 +99,9 @@ android {
                 "proguard-rules.pro"
             )
             signingConfig = signingConfigs.findByName("release")
+            // 恒空串：发布包永远读生产清单，即使有人在本机带属性跑过一次 assembleRelease，
+            // 传进去的值也不会进包（覆盖这条路只能出现在 debug 的 APK 里）。
+            buildConfigField("String", "UPDATE_MANIFEST_URL_OVERRIDE", "\"\"")
         }
     }
 
@@ -94,6 +133,10 @@ android {
 tasks.withType<AbstractTestTask>().configureEach {
     if (name == "testDebugUnitTest") {
         inputs.file(rootProject.file("update.json"))
+        // 门禁演练用的那份同理：UpdateRehearsalManifestTest 读它，而它也是手写的。
+        // 不登记的话"只改这份测试清单"的那次提交里任务会判 UP-TO-DATE，
+        // 而"演练清单其实已经不会触发门禁"这件事只有这一条用例会红。
+        inputs.file(rootProject.file("update.test.json"))
         // 同一个理由：UpdateInstallPathTest 读这份 xml 来比对 FileProvider 的 root 与
         // shared 的 UPDATE_DIR_NAME。它是源码目录下的资源文件，不是这条任务的声明输入，
         // 只改这一行 xml 时任务会判 UP-TO-DATE —— 而"配置与代码漂移"正是这条用例要抓的。

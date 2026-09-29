@@ -1,6 +1,7 @@
 package com.jianyi.outfit.di
 
 import android.content.Context
+import android.util.Log
 import com.jianyi.outfit.BuildConfig
 import com.jianyi.outfit.data.AppDependencies
 import com.jianyi.outfit.data.AppUpdateGateway
@@ -26,6 +27,7 @@ import com.jianyi.outfit.data.repository.WeatherRepository
 import com.jianyi.outfit.data.repository.WeatherRepositoryImpl
 import com.jianyi.outfit.data.update.ApkDownloader
 import com.jianyi.outfit.data.update.KtorUpdateHttp
+import com.jianyi.outfit.data.update.UPDATE_MANIFEST_URL
 import com.jianyi.outfit.data.update.UpdateRepository
 import com.jianyi.outfit.notification.DailyPushScheduler
 import com.jianyi.outfit.notification.Notifier
@@ -146,14 +148,37 @@ class AppContainer(context: Context) : AppDependencies {
      * 所以哪怕这里忘换、真机永远下不下来，全套单测仍然一条不红。
      * 换掉它不写在这里容易被当成"收尾工作顺手做的"，所以留一句：容器接线没有测试覆盖，
      * 它是本轮唯一只能靠读 diff 与真机确认的改动点。
+     *
+     * manifestUrl 走 [updateManifestUrl]：默认就是 shared 里那个生产地址，只有带
+     * `-PupdateManifestUrl=` 打出来的 debug 包才指向别处（理由见 app/build.gradle.kts）。
      */
     override val updateViewModel: UpdateViewModel = newUpdateViewModel(
         appVersion = appVersion,
-        checker = UpdateRepository(KtorUpdateHttp()),
+        checker = UpdateRepository(
+            http = KtorUpdateHttp(),
+            manifestUrl = updateManifestUrl()
+        ),
         installer = ApkDownloader(context.applicationContext),
         gateway = updateGateway,
         scope = updateScope
     )
+
+    /**
+     * 清单地址：`BuildConfig.UPDATE_MANIFEST_URL_OVERRIDE` 非空则用它，空则回退生产常量。
+     *
+     * release 那一侧这个字段是**编译期写死的空串**（见 build.gradle.kts 的 buildTypes），
+     * 所以"发布包读到演练清单"这条路不是靠"记得别带参数"来防的，是靠字段形状防的。
+     * 空串走 isBlank 回退，因此不存在"覆盖成空 ⇒ 全世界读不到清单"的第三种状态。
+     *
+     * 生效时打一条 logcat，与 shared 那条告警同一个 tag（`adb logcat -s JianyiUpdate` 一屏看全）：
+     * 演练最怕"以为在测覆盖清单、其实打的是生产清单"，那样看到的一切结论都是假的。
+     */
+    private fun updateManifestUrl(): String {
+        val override = BuildConfig.UPDATE_MANIFEST_URL_OVERRIDE
+        if (override.isBlank()) return UPDATE_MANIFEST_URL
+        Log.i("JianyiUpdate", "调试用清单地址覆盖生效：$override（生产包不会走到这一行）")
+        return override
+    }
 
     /**
      * 风景背景控制器（全应用单例）。

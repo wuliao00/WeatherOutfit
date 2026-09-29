@@ -1,7 +1,7 @@
 {
-  "versionCode": 8,
-  "versionName": "2.1.2",
+  "versionCode": 9,
+  "versionName": "2.2.0",
   "minSupportedVersionCode": 1,
-  "apkUrl": "https://gitee.com/wuliao11541/WeatherOutfit/releases/download/v2.1.2/jianyi-2.1.2.apk",
-  "notes": "首个支持应用内更新的版本"
+  "apkUrl": "https://gitee.com/wuliao11541/WeatherOutfit/releases/download/v2.2.0/jianyi-2.2.0.apk",
+  "notes": "首个支持应用内更新的版本：冷启动检查、可跳过提示、必要时硬门禁，App 内下载并拉起安装页。"
 }

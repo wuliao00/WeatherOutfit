@@ -331,7 +331,11 @@ fun SettingsScreen(
                     )
                 }
                 TextButtonRow("重新查看使用须知", viewModel::resetDisclaimer)
-                TextButtonRow("版本 2.0.0", null)
+                // 这里原来写死 "版本 2.0.0"：装机已经 2.1.2 而这一行还停在 2.0.0，
+                // 而本次抬到 2.2.0 时它会紧挨着上面那行"当前版本 2.2.0（…）"——
+                // 同一张卡片上两个版本号互相否认，比不显示更糟。值由 app 侧注入，
+                // 这里不做任何版本比较（比较只许在判定层那一处）。
+                TextButtonRow("版本 ${deps.appVersion.versionName}", null)
                 Text(
                     text = "生活指数与紫外线等级由本地规则估算，不是官方发布值。",
                     style = MaterialTheme.typography.labelSmall,

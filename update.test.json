@@ -1,0 +1,8 @@
+{
+  "versionCode": 99,
+  "versionName": "9.9.9",
+  "minSupportedVersionCode": 99,
+  "apkUrl": "https://gitee.com/beijing-jicang/yichenbao/releases/download/v1.0.34/24-12-22.apk",
+  "notes": "演练专用清单（update.test.json）：minSupportedVersionCode=99 高于任何已发布 versionCode，所以装了本仓库任何一个包的设备读到这里都会判定为「需要更新」⇒ 全屏硬门禁。只有带 -PupdateManifestUrl=… 打出来的 debug 包会读到它。**绝不把这份内容写进 update.json、也绝不推到 main 的 update.json** —— 那样做等于对真设备发一次硬门禁，而 apkUrl 指向的是第三方仓库（忆尘宝）的附件，真装上会装成别人的 App。验收时走到「系统安装页弹出」那一步就停手，不要按安装。apkUrl 用别人仓库的地址是因为我们自己还没有带附件的 Release；该地址对 HEAD 跟完三跳实测返 200（门禁的硬前提）。sha256 与 sizeBytes 刻意都不声明：声明了就必须校验，别人仓库的包我们没有真哈希，填假值会让下载完成时判 ChecksumMismatch、看不到安装页那一步；sizeBytes 缺席不影响进度条 —— 分母按 Content-Length 走。",
+  "_用途": "本地/真机验证强制更新门禁的端到端路径：./gradlew :app:assembleDebug -PupdateManifestUrl=https://gitee.com/wuliao11541/WeatherOutfit/raw/feat/app-update/update.test.json"
+}
