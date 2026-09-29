@@ -7,11 +7,14 @@ import kotlin.test.assertTrue
 
 class UpdateManifestTest {
 
+    /** 合法 sha256 的形状：64 位小写十六进制。夹具里当"真哈希"用 */
+    private val sha = "a".repeat(64)
+
     private val valid = """
         {"versionCode":9,"versionName":"2.2.0","minSupportedVersionCode":9,
          "apkUrl":"https://gitee.com/wuliao11541/WeatherOutfit/releases/download/v2.2.0/jianyi-2.2.0.apk",
-         "sha256":"a".repeat(0)+"${"a".repeat(64)}","sizeBytes":24115200,"notes":"修 bug"}
-    """.trimIndent().replace("\"a\".repeat(0)+", "")
+         "sha256":"$sha","sizeBytes":24115200,"notes":"修 bug"}
+    """.trimIndent()
 
     @Test fun full_manifest_parses() {
         val m = UpdateManifestParser.parse(valid)
@@ -100,6 +103,9 @@ class UpdateManifestTest {
      * 而 "9" 解成 9 是无害的；手写结构校验既会误伤以后合法的新写法，
      * 也是长期维护负担（它还得跟着 @SerialName 改）。
      * 真正的防线 = 不开 coerceInputValues + isSane() 的 `<= 0` 闸，不是拒引号。
+     *
+     * 注意：本条钉的是 **kotlinx-serialization 的库行为，不是我们对外承诺的契约**；
+     * 哪天升级让解析变严格了，直接删掉这条用例即可，不要为了它去改实现。
      */
     @Test fun quoted_number_is_accepted_by_design() {
         val m = UpdateManifestParser.parse(
@@ -149,7 +155,12 @@ class UpdateManifestTest {
         )
     }
 
-    /** minSupported 高于 latest 是写错，不是"更强硬"：钳到 latest，但仍算有效清单 */
+    /**
+     * minSupported 高于 latest 是写错的清单，但**解析器不钳制**：原样透出 12。
+     *
+     * 给 T2 的提醒：钳制（或不钳制）是 `decideUpdate` 的判定语义，不该由解析器偷偷改数据；
+     * 判定层必须自己发现 `minSupportedCode > versionCode` 这种矛盾，别指望拿到的是已被修正的值。
+     */
     @Test fun min_above_latest_still_parses() {
         val m = UpdateManifestParser.parse(
             """{"versionCode":9,"versionName":"2.2.0","minSupportedVersionCode":12,"apkUrl":"https://gitee.com/x.apk"}"""

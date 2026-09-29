@@ -1,4 +1,5 @@
 import java.util.Properties
+import org.gradle.api.tasks.testing.AbstractTestTask
 
 plugins {
     alias(libs.plugins.android.application)
@@ -84,6 +85,17 @@ android {
 }
 
 // （KSP / Room schema 已随持久层一起搬到 shared，app 不再跑注解处理器）
+
+// update.json 是仓库根的一份手写文件，被 app/src/test 的 UpdateManifestFileTest 直接读，
+// 但它**不是**这条测试任务的声明输入 —— 于是"只改清单、不改代码"的那次提交里，
+// 本地任务判 UP-TO-DATE、CI 里更糟是直接 FROM-CACHE，那把"T11 抬版本却忘了改清单"的锁
+// 会在最该响的时候安静下来。显式登记成输入后，文件内容变化会进任务的输入快照
+// （Gradle 按内容哈希而非 mtime 判），既让本地重跑，也让 CI 的缓存 key 跟着变。
+tasks.withType<AbstractTestTask>().configureEach {
+    if (name == "testDebugUnitTest") {
+        inputs.file(rootProject.file("update.json"))
+    }
+}
 
 dependencies {
     // 领域层（引擎 + 数据模型）。包名与 app 内一致，所以这一步不改任何 import。
