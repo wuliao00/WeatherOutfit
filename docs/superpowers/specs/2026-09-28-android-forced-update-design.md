@@ -54,6 +54,17 @@
 6. **`/releases/latest` 的响应形态由 UA 决定**：`okhttp/4.12.0` 给 JSON，`Dalvik/2.1.0 (…)` 给 HTML，`curl` UA 直接给源码 zip。App 默认 UA 正是 Dalvik。⇒ **不用它当清单**，避免依赖 UA 协商。
 7. **配额**：单附件 100MB（GVP 200MB）、单仓库附件总量 1GB、Git 单文件 50MB、仓库 500MB。当前 debug APK 23,999,408 字节，release 未签名 4,630,357 字节 ⇒ 走附件余量充足。
 8. **Gitee Pages 已下线**（`*.gitee.io` 全 404，官方 sitemap 无条目）；**Git LFS 仅付费企业**。备选承载只剩"提交进仓库走 raw"（受 50MB 单文件限制）。
+9. **附件响应的 `Content-Length` 比清单里手写的 `sizeBytes` 更有资格当完整性依据**（2026-09-30 修复轮引入的判据，理由不是偏好而是两条实测）：
+   - §3.3 那次实测（第三方 79,027,726 字节的 APK）里第三跳那条 200 是**定长响应**，长度是服务器给的；
+   - §3.4 那次"掐半截"的失败形态是**通道正常结束、不抛异常** —— 于是"收到多少字节"只有对着服务器自己说的那个数才判得出来。
+   清单里的 `sizeBytes` 是人在 APK 还不存在时手写的（与 §5 那条"sha256 改可选"是同一条理由，而那条 Ruling 只救了 sha256），
+   CI 重跑一次、zip 时间戳变一字节就会与它差 1 ⇒ 用精确等式比它，每次下载都以"网络中断"告终；写大十倍 ⇒ 空间前置闸按错的数算 ⇒ **永久 NoSpace，硬门禁下没有任何出路**。
+   所以现在的次序是：`Content-Length` 优先（完整性判定 + 进度分母 + 空间前置闸），手写值只在它缺席时兜底、
+   并且"与实测不符"必须打一条 warning（走 §5 那条既有注入 sink），因为这个漂移否则永远没人知道。
+10. **生产 `update.json` 今天既没有 `sha256` 也没有 `sizeBytes`**（2026-09-30 复核仓库根那份文件：只有 versionCode/versionName/minSupportedVersionCode/apkUrl/notes 五项）。
+    ⇒ 清单侧的完整性输入是空的，全靠 §3.9 的 `Content-Length` 兜住；万一某个 CDN 形态不给这个头，就只剩"非空即完整"这一条。
+    **这个状态由 Task 11 消除**：抬版本那次必须把两个字段一起回填（与 §8.2 那道"哈希/字节数与包比对，不一致就让 job 失败"是同一次），
+    否则 §9 那条仓库自校验用例仍然绿，而两道闸有一道是开着的。
 
 ---
 
@@ -90,9 +101,15 @@ enum class InstallResult { Launched, PermissionMissing, Failed }
 
 **新增 `app/src/main/java/com/jianyi/outfit/`**
 
-- `update/ApkDownloader.kt` — 流式写盘 + 进度 Flow + 边下边算 sha256。
 - `update/AndroidUpdateGateway.kt` — FileProvider + `ACTION_VIEW` 安装；`canRequestPackageInstalls()` 判断权限。
+  （实现落地时又加了一个文件：`update/UpdateInstallPath.kt` —— `install()` 的路径守卫，见 §7。）
 - `platform/IosUpdateGateway.kt`（`shared/src/iosMain`）— `supported = false` 的空实现。
+
+> **一处位置修订**：`ApkDownloader.kt` 最终不在 app 模块，而在 **`shared/src/androidMain/kotlin/com/jianyi/outfit/data/update/`**。
+> 理由是 shared 的 Ktor 是 `implementation()`，app 的编译类路径上没有 `io.ktor.*`，而下载器要用的引擎工厂
+> `httpClientEngine()` 本来就是 shared 模块内的 internal 声明（Ruling 见 SDD 台账）。
+> 代价：将来若要把下载器挪回 app，得先给 app 显式声明 ktor 依赖。
+> 测试放在同模块新建的 `shared/src/androidUnitTest/`（`sha256Of`、`downloadEvents` 都是 internal，跨模块看不见）。
 
 **改动**
 
@@ -121,7 +138,9 @@ enum class InstallResult { Launched, PermissionMissing, Failed }
 ```
 
 必填：`versionCode`、`versionName`、`minSupportedVersionCode`、`apkUrl`。
-可选：`sha256`（缺失则跳过校验，见下）、`sizeBytes`（缺失则进度条走不确定态）、`notes`（缺失则卡片不显示说明段）。
+可选：`sha256`（缺失则跳过校验，见下）、`sizeBytes`（缺失则进度条走不确定态；**且它本来就不参与完整性判定**，
+判据是响应头的 `Content-Length`，见 §3.9 —— 这条在 2026-09-30 修复轮才写清，之前实现按手写值判）、
+`notes`（缺失则卡片不显示说明段）。
 
 **`sha256` 为什么改成可选（写计划时发现的时序死结）**：清单由人在提版本号时手写，而那一刻 APK 还不存在、
 哈希无从得知；若把 `sha256` 定为必填，就只能先填一个假哈希（校验必失败）或者让 CI 回写清单
@@ -153,16 +172,70 @@ enum class InstallResult { Launched, PermissionMissing, Failed }
 UI 状态：`Idle → Checking → (Hidden | OptionalCard | Gate) → Downloading(progress) → Installing → Failed(reason)`。
 `Gate` 无关闭按钮、返回键不放行；`OptionalCard` 可跳过，每次冷启动最多弹一次 —— 这个"已弹过"只存在 ViewModel 内存里，**不落盘**（落盘会让用户永远看不到第二次提示，而强更的提示本来就该每次开 App 都提醒一次）。
 
+**两条相反方向的力，必须同时成立（Task 6+7 评审轮定死，详见 §7.1）**：
+
+1. `Failed` 放开遮罩与返回键，连 `forced=true` 也放开 —— 下不下来时必须能走。
+2. `forcedThisLaunch` **只进不出**：这次冷启动挂过门禁之后，一次失败的检查（手动「检查更新」恰好断网）
+   不许把状态打回 `Hidden` —— 门禁不许被用户随手一点解除。
+
+粘滞的实现**不能**读"当前状态是不是 `Gate`"：下载一开始状态就变成 `Downloading`，那一刻恒 false，
+`Downloading/Failed` 的 `forced` 全丢 ⇒ 下载中途按一次返回就绕过门禁（评审给过这条修法，被否）。
+
+`Downloading` 的 `done/total` 三种取值各对应一句不同的话（null/有值 × null/有值），
+且 `total == 0` 与 `total == null` 是同一件"不知道"（进度条与文案必须一起走不确定态，
+否则出现"条不涨、文字却写 `11.4 MB / 0.0 MB`"那种自相矛盾）。
+
 ---
 
 ## 7. 下载与安装
 
-- 落盘 `context.cacheDir/update/jianyi-<versionName>.apk`，先删同名旧文件。
+- 落盘 `context.cacheDir/update/jianyi-<versionName>.apk`，先删同名旧文件。目录名由 shared 的 `UPDATE_DIR_NAME` 一处定义：它是**下载落盘位置 / `file_paths.xml` 的 FileProvider root / `install()` 的路径守卫**三处共同的契约，各写一份字面量就会漂（漂了的表现是真机装不上而单测全绿）。
 - **每次下载都从 `apkUrl` 重新走三跳**，不缓存签名 URL（15 分钟过期）。
 - 流式写盘 + 边写边算 sha256；下完比对，不一致 ⇒ 删文件、判失败。
-- **不支持断点续传**（foruda 忽略 Range）⇒ 失败即整文件重下，最多自动重试 1 次，之后进 `Failed` 给逃生口。
+- **完整性与进度分母只看 `Content-Length`**（§3.9）：`isBodyComplete(收到的字节数, Content-Length ?: sizeBytes)`。
+  清单手写的 `sizeBytes` 不参与判定，只在实测长度缺席时兜底，并且与实测不符时打一条 warning。
+  空间前置闸（`shouldRefuseDownload`）同样按实测长度判，且对 `sizeBytes` 按配额 100MB 加顶 ——
+  否则一个离谱的手写值会让 `total * 5` 溢出成负数，把这道"为了省流量而设"的闸静默关掉。
+- **不支持断点续传**（foruda 忽略 Range）⇒ 失败即整文件重下。
+- **自动重试只对 `Network` 这一种成因，最多 1 次**（2026-09-30 修复轮补的实现；这句过去只写在 spec 里，代码没人实现也没登记偏离）：
+  `ChecksumMismatch` 重一遍只是再下一遍同一个坏包，`NoSpace` 重一遍必然还是不够，`Io` 是本地盘的问题 ——
+  把它们也重一遍等于把一次故障变成两次流量。重试期间**不 emit 中间那条失败**，否则门禁卡片会在下载路上闪成失败态又跳回来。
 - 安装：`FileProvider.getUriForFile` + `ACTION_VIEW` + `application/vnd.android.package-archive` + `FLAG_GRANT_READ_URI_PERMISSION`。API 26+ 需 `REQUEST_INSTALL_PACKAGES`，未授予时用 `ACTION_MANAGE_UNKNOWN_APP_SOURCES` 引导（各 ROM 表现不同，见 §10 真机清单）。
+- **`install(path)` 只接受 `cacheDir/update/` 之下的文件**（层间契约守卫，2026-09-30 修复轮）：
+  `Success(path)` → `install(String)` 是这条链上唯一的跨层输入，过去没有任何一处验过它真的是下载器落盘的那个文件。
+  守卫放在 gateway 而不是下载器，因为只有 gateway 知道 FileProvider 的 root；下载器那侧的文件名清洗只是**策略**。
+  越界 ⇒ 直接 `InstallResult.Failed` 并留一条带路径的日志，**不许**让 `getUriForFile` 抛 `IllegalArgumentException`
+  再被折成"写入失败，请清理手机存储"那句误报文案。
 - 逃生口（`Failed` 与权限被拒时都给出）：「重试」+「复制下载链接」。复制链接是最后一道保险 —— 用户可以拿去浏览器或另一台设备下。
+  没有 `apkUrl` 可复制时，那颗按钮就不摆（这条过滤现在在 `gateActions(state, hasUrl)` 里，不在 UI 侧 `.filterNot`：
+  两边各写一份的结果是"遮罩按住整页而按钮一颗不剩"，见 §6）。
+
+### 7.1 失败态不锁死用户（**刻意的语义，不是遗漏**）
+
+计划第 5 行的 Goal 写着"任何失败都能退出而不锁死用户"，这一句在代码里是三处一致的实现，改任何一处都要同时核对另外两处：
+
+| 状态 | 遮罩 + 吃点击 `gateHoldsPage` | 返回键 `shouldBlockBack` | 文案分量 `gateIsForced` | 关闭入口 |
+|---|---|---|---|---|
+| `Gate` | 按住 | 吞 | 门禁那一套 | 无 |
+| `Downloading(forced=true)` | 按住 | 吞 | 门禁那一套 | 无 |
+| `Failed(forced=true)` | **放开** | **放开** | **门禁那一套** | 无 |
+
+- **`Failed` 放开是刻意的**：硬门禁 + 下载失败时把用户锁在屏幕上，正是本功能最要避免的"变砖"形态
+  （下不下来、又走不掉，只能杀进程）。放开之后卡片仍然给「重试」与「复制下载链接」，逃生口在那里，不在返回键上。
+- **`gateHoldsPage=false` 而 `gateIsForced=true` 这个差一个分支是接受的**（Task 8 实现时发现的这条不一致）：
+  文案分量决定"标题说什么、有没有关闭入口"，放开点击/返回决定"退得出去吗"，是两件事。
+  合并前两条会让下载失败之后仍然按住用户；合并后两条会给 `Failed` 摆一颗按下去毫无反应的「以后再说」
+  （VM 的 `dismissOptional()` 只认 `OptionalCard` 那一态）。两种合并都有具体症状，所以分开写、分开测。
+- **放开不等于解除**：`Failed` 仍然没有关闭入口，标题仍然说"需要更新"，而**门禁下次冷启动会重新出现**
+  （判定层每次冷启动重算，落盘没有任何"已跳过"状态）。
+- 与之相对的**另一半**是"门禁不许被一次手动检查解除"（同轮修复）：`forcedThisLaunch` 是**只进不出**的粘滞，
+  这次冷启动挂过门禁之后，`checkOnce`/`forceCheck` 拿到 `Unreachable`/`UpToDate` 也不许把状态打回 `Hidden`。
+  这两条不矛盾：**被禁掉的是"检查失败后卡片整张消失"，被放开的只是"下不下来时的退出路"**。
+  注意不要用"读当前状态是不是 `Gate`"来实现粘滞 —— 下载一开始状态就变成 `Downloading`，
+  那一刻 `is Gate` 恒 false，`Downloading/Failed` 的 `forced` 全丢，正好复现"下载中途按一次返回就绕过门禁"。
+- **遮罩盖不住 `Dialog`/`Popup`**：Compose 里它们是**独立 window**，不在本层的 composition 树内。
+  所以"这层盖得住所有弹层"那句描述只在 Activity 的内容视图内成立（本轮之前写的是"永远盖在所有页面与弹层之上"，
+  现已改口）。这不是绕过口：返回键与点击仍然被 Activity 这一层拦着，Dialog 挡不住的是"看得见"而不是"绕得过去"。
 
 ---
 
@@ -188,8 +261,20 @@ UI 状态：`Idle → Checking → (Hidden | OptionalCard | Gate) → Downloadin
 
 - `UpdateDecisionTest`：表驱动 ≥ 10 例，覆盖 §6 全部分支，含"当前版本高于清单""`min > latest` 错配""HEAD 探不到包 ⇒ 降级 Optional"。
 - `UpdateManifestTest`：合法 / 缺必填 / 类型错 / `sha256` 非 64 位十六进制 / 含未知字段。
+- **`ApkDownloadFlowTest`（`shared/src/androidUnitTest`，Task 6+7 评审轮新建）**：`downloadEvents` 那一层的判定与组装。
+  ① 假响应走过**真实写盘**之后 flow 必须真的发过 `Progress`，且 `Success.path` 落在给定目录里；
+  ② 跨层：同一个 `Progress(12_000_000, 24_000_000)` 喂进真 `UpdateViewModel`（门禁态）再读 `gateDownloadView` 必须是 `0.5f`；
+  ③ 完整性 / 进度分母 / 空间前置闸都按 `Content-Length` 判（含"手写值差一字节仍算下完并报警"、"手写值大十倍不许把下载拒在门外"）；
+  ④ 只有 `Network` 自动重试一次，且重试期间不 emit 中间那条失败；⑤ 目录建不出来时报得出成因、且不碰网络。
+  **这个文件存在的理由本身要写在这里**：判据与平台接线揉在同一个 `flow {}` 里的时候，全仓没有一条测试构造过下载器，
+  把 `onProgress = { emit(it) }` 改成空 lambda ⇒ 185 条全绿（评审 C3）。
+- **`UpdateInstallPathTest`（app 侧，同轮新建）**：`install()` 的路径守卫 —— 越界 / 带 `..`（解析后越界）/
+  前缀撞上的兄弟目录 / 目录自身 / 不存在的文件都判 `InstallResult.Failed` 且不抛；
+  外加一条读真实 `file_paths.xml` 断言它覆盖 `UPDATE_DIR_NAME` 那一层（读真实文件的理由同下条）。
 - **仓库自校验用例**：读真实 `update.json` 文件，断言必填字段齐全、`sha256` 若声明则格式正确、`apkUrl` 的 tag 段与 `versionName` 一致。这条专门拦"改了版本号忘了改清单"。
   实现位置是 **app 的 JVM 测试**而不是 commonTest —— commonTest 没有读文件的 API，且 iOS 模拟器沙箱里也没有仓库工作树；从测试工作目录向上找到含 `settings.gradle.kts` 的根目录再读。
+  **两条被测的真实文件都要登记成测试任务的输入**（`app/build.gradle.kts` 的 `inputs.file(...)`）：
+  `update.json` 与 `file_paths.xml` 都不是编译产物，不登记的话"只改这两个文件"的那次提交会让任务判 UP-TO-DATE、CI 里 FROM-CACHE，锁在最该响的时候安静。
 
 
 **真机（本机 Windows 测不了的部分，vivo V2156A 与 OPPO PLB110 各一遍）**
@@ -215,6 +300,10 @@ UI 状态：`Idle → Checking → (Hidden | OptionalCard | Gate) → Downloadin
 | 附件名被小写化 | 已实测（`attname` 保留原名） | `apkUrl` 里的小写文件名按实际填，别靠大小写区分 |
 | 内容审核字段 `censor_failed` | 存在，行为未知 | 首次发布后检查附件是否可下载 |
 | 门禁 + 源不可达 | 设计已消解 | HEAD 探包 + 清单无效即 Unreachable |
+| **生产 `update.json` 当前无 `sha256` 也无 `sizeBytes`**（§3.10） | **今天就是这样** | 完整性只能靠响应的 `Content-Length`；若某个 CDN 形态连这个头也不给，就只剩"非空即完整"这一条 ⇒ **T11 抬版本时必须把两项一起回填**，否则 §8.2 那道 CI 比对闸等于没接线 |
+| `ApkDownloader.openBody`（Ktor 三跳接线那几行） | 无自动化覆盖 | 判定层全部挪进 `downloadEvents` 之后，剩下没锁的只有"GET/重定向/引擎"这几行；`ApkDownloadFlowTest` 用假 body 覆盖了它之上的每一条判据。真机回归第 4/6 项是唯一证据 |
+| 容器接线（`AppContainer` 里 `installer = ApkDownloader(...)`） | 无自动化覆盖 | 写错成 `UnsupportedInstaller` 时 195 条全绿而真机永远下不下来 —— 台账里已记为"只能靠读 diff 与真机确认"的那一处 |
+| 遮罩盖不住 `Dialog`/`Popup`（独立 window，§7.1 末条） | 已知并接受 | 拦人靠遮罩吃点击 + Activity 侧返回键，二者都不依赖"盖住 Dialog"；以后给更新流程加 Dialog 时要重新评估 |
 
 ---
 

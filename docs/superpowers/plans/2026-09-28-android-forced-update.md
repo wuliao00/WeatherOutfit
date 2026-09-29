@@ -23,6 +23,21 @@
 - 设备前台若属于别的运行中会话（`com.studykit`、`com.wuliao00.genglingng` 等），立刻停手，把设备侧结论标为未验证。
 - 清单解析必须**严格**：不允许 `coerceInputValues` / `isLenient`（理由见 Task 1）。
 - 门禁的硬前提：`apkUrl` HEAD 探包成功（2xx）才允许 `Forced`；清单无效/拉取失败/探包失败一律不拦。
+- **两条相反的语义要同时成立，不要"顺手修"成一条**（Task 6+7 评审轮定死，spec §7.1）：
+  1. **失败态不锁死用户**：`Failed` 不盖遮罩、不吞返回键，连 `forced=true` 也不 —— 计划第 5 行的 Goal 就是这句。
+     硬门禁 + 下载失败时把用户按在屏幕上，正是本功能最要避免的"变砖"形态；而门禁下次冷启动会重新出现，
+     所以放开**不等于**解除。`gateHoldsPage(Failed)=false` 而 `gateIsForced(Failed)=true` 这个差一个分支是接受的。
+  2. **门禁不许被一次手动检查解除**：`forcedThisLaunch` 只进不出，这次冷启动挂过门禁之后，
+     检查失败（`Unreachable`/`UpToDate`）也不许把状态打回 `Hidden`。
+  被禁掉的是"检查失败后卡片整张消失"，被放开的只是"下不下来时的退出路"，两者不矛盾。
+  实现粘滞**不要**读"当前状态是不是 `Gate`"：下载一开始状态就变成 `Downloading`，那一刻恒 false，
+  `Downloading/Failed` 的 `forced` 会全丢 ⇒ 下载中途按一次返回就绕过门禁。
+- **下载的完整性与进度分母只看 `Content-Length`**（spec §3.9）：清单手写的 `sizeBytes` 不参与判定，
+  只在实测长度缺席时兜底、且与实测不符时打一条 warning。空间前置闸也按实测长度判，并对 `sizeBytes` 按 100MB 配额加顶
+  （离谱手写值会让 `total * 5` 溢出成负数，把这道闸静默关掉）。
+- **`install(path)` 只接受 `cacheDir/update/` 之下的文件**（层间契约守卫在 gateway，不在下载器；spec §7）。
+- **`update.json` 里某个字段是"可选"不等于"可以不填"**：今天它既没 `sha256` 也没 `sizeBytes`，
+  ⇒ 清单侧的完整性输入为空。Task 11 抬版本时**必须**把两项一起回填，否则 §8.2 那道 CI 比对闸等于没接线。
 - **版本号比较只许出现在 `UpdateDecision.kt` 一个文件里**（`decideUpdate` 与 `needsApkProbe` 共用
   `effectiveMinSupportedCode()`）。任何 Task 都不许在 UI/VM/仓库里再写一次 `>= versionCode` ——
   两处漂移的症状是"该探时没探 ⇒ Forced 静默变 Optional"，零日志零红测。
@@ -1665,7 +1680,11 @@ import com.jianyi.outfit.ui.glass.GlassShapes
 import com.jianyi.outfit.ui.glass.GlassSurface
 
 /**
- * 更新门禁 / 提示层。挂在 RootScreen 的 Box 里、content 之后 ⇒ 永远盖在所有页面之上。
+ * 更新门禁 / 提示层。挂在 RootScreen 的 Box 里、content 之后 ⇒ 盖在导航栈内的所有页面与弹层之上。
+ *
+ * **一句诚实的边界（Task 6+7 评审轮改口）**：Compose 的 `Dialog`/`Popup` 是**独立 window**，
+ * 不在本层的 composition 树里，所以这层遮罩盖不住它们。原文那句"永远盖在所有页面与弹层之上"不成立。
+ * 这不是绕过口：返回键与点击仍然被 Activity 这一层拦着，Dialog 挡不住的是"看得见"，不是"绕得过去"。
  *
  * 三条硬规矩（都是这个仓库今天踩过或推演出来的）：
  * 1. Gate 不提供任何关闭入口，返回键由宿主 Activity 侧拦（见 Task 8）；
@@ -1881,7 +1900,8 @@ import kotlinx.coroutines.launch
                 LocalAppDependencies provides deps
             ) {
                 content()
-                // 更新门禁：必须在 content 之后，才能盖住所有页面与弹层
+                // 更新门禁：必须在 content 之后，才能盖住导航栈内的所有页面
+                // （Dialog/Popup 是独立 window，这层盖不住 —— 拦人是靠遮罩吃点击 + Activity 侧的返回键）
                 UpdateGateLayer(vm = deps.updateViewModel)
             }
 ```
@@ -2068,6 +2088,21 @@ Expected: 编译失败（Unresolved reference: sha256Of）
 
 - [ ] **Step 3: 写实现**
 
+> **⚠️ 下面的代码块是 Task 7 当时的形状，已被 Task 6+7 评审轮改了三处 —— 照抄会得到评审前那版。**
+> 真实实现见 `shared/src/androidMain/.../ApkDownloader.kt`，三处修订是：
+> 1. **完整性与进度分母按 `Content-Length` 判**，不是 `manifest.sizeBytes`
+>    （`isBodyComplete(written, Content-Length ?: sizeBytes)`；手写值差一字节就会让每次下载都以"网络中断"告终，
+>    写大十倍会让空间前置闸永久 `NoSpace`；而生产 `update.json` 两个字段都没填 ⇒ 判据在真实数据上是开着的）。
+>    空间前置闸同样按实测长度判，并对 `sizeBytes` 按配额 100MB 加顶（`total * 5` 溢出会把这道闸静默关掉）。
+> 2. **`mkdirs()` 的返回值要判**：建不出来时给一条说清"是目录不是存储"的 warning，
+>    否则 `FileOutputStream` 的异常会被折成"请清理手机存储"那句误报文案。
+> 3. **flow 组装抽成 `downloadEvents(manifest, dir, openBody, logWarning, freeSpace)`**，
+>    Ktor 接线只留 `openBody` 一个接缝 —— 理由是全仓没有一条测试构造过 `ApkDownloader`，
+>    把 `onProgress = { emit(it) }` 换成空 lambda 时 185 条全绿。测试见 `ApkDownloadFlowTest`（含跨层那条）。
+> 另有两条小修订：`HttpClient` 改 `by lazy`（容器 eager + 引擎起不来 = 冷启动崩，与本功能 fail-open 的态度相反），
+> 以及 spec §7 那句"最多自动重试 1 次"补实现（**只对 `Network`**；`ChecksumMismatch`/`NoSpace`/`Io` 不重试，
+> 且重试期间不 emit 中间那条失败）。
+
 `shared/src/androidMain/kotlin/com/jianyi/outfit/data/update/ApkDownloader.kt`：
 
 ```kotlin
@@ -2213,6 +2248,20 @@ git commit -m "feat(update): APK 流式下载器，边下边算 sha256，坏包�
 ---
 
 ## Task 8: 权限、FileProvider 与安装页
+
+> **Task 6+7 评审轮对本 Task 的三点修订**：
+> 1. **多一条守卫**：`install(path)` 必须拒掉不在 `cacheDir/update/` 之下的路径（`UpdateInstallPath.kt`
+>    的 `precheckInstallPath` + `isUnderRoot`，越界 ⇒ `InstallResult.Failed` 而不是让 FileProvider 抛
+>    `IllegalArgumentException` 再被折成"请清理手机存储"那句误报文案）。判据抽成不碰 Context 的纯函数，
+>    是因为 app 测试没有 Robolectric，构造不出 `Context` —— 那三行接线只能靠读 diff 与真机确认。
+>    目录名收成 shared 的 `UPDATE_DIR_NAME` 一处，与 `file_paths.xml` 之间有 `UpdateInstallPathTest` 钉着。
+> 2. **`apkFileNameFor` 不清洗分隔符那条派发词是错的**（Task 7 报告的第⑧条与提交内容不符）：
+>    `:80` 的白名单早就把 `/` 与 `\` 夹成下划线，并有用例 `a_hostile_version_name_cannot_escape_the_directory`。
+>    真正没清洗的是**连续的点**，那条已在 Task 8 补上（`..` → `_`），理由写在函数 KDoc 里：
+>    它今天出不了目录靠的是 `"jianyi-"` 前缀恰好挡住 `..`，而一个没人依赖的前缀不算守卫。
+> 3. **`Failed` 放开返回键是刻意的**（`failed_stops_blocking_so_user_can_leave` 就是计划要的行为，别"修"回去）：
+>    `gateHoldsPage(Failed)=false` 而 `gateIsForced(Failed)=true` 这个差一个分支是**接受**的不一致，
+>    理由与"门禁不许被一次手动检查解除"为什么不矛盾，见 spec §7.1 与本文开头的 Global Constraints。
 
 **Files:**
 - Modify: `app/src/main/java/com/jianyi/outfit/update/AndroidUpdateGateway.kt`
