@@ -26,7 +26,8 @@
 - **两条相反的语义要同时成立，不要"顺手修"成一条**（Task 6+7 评审轮定死，spec §7.1）：
   1. **失败态不锁死用户**：`Failed` 不盖遮罩、不吞返回键，连 `forced=true` 也不 —— 计划第 5 行的 Goal 就是这句。
      硬门禁 + 下载失败时把用户按在屏幕上，正是本功能最要避免的"变砖"形态；而门禁下次冷启动会重新出现，
-     所以放开**不等于**解除。`gateHoldsPage(Failed)=false` 而 `gateIsForced(Failed)=true` 这个差一个分支是接受的。
+     所以放开**不等于**解除。`blocksUser(Failed, …)=false` 而 `gateIsForced(Failed)=true` 这个差一个分支是接受的
+     （`blocksUser` 原名 `gateHoldsPage`，终审修复轮第 2 条去掉了它的 `hasUrl` 默认参数）。
   2. **门禁不许被一次手动检查解除**：`forcedThisLaunch` 只进不出，这次冷启动挂过门禁之后，
      检查失败（`Unreachable`/`UpToDate`）也不许把状态打回 `Hidden`。
   被禁掉的是"检查失败后卡片整张消失"，被放开的只是"下不下来时的退出路"，两者不矛盾。
@@ -37,7 +38,14 @@
   （离谱手写值会让 `total * 5` 溢出成负数，把这道闸静默关掉）。
 - **`install(path)` 只接受 `cacheDir/update/` 之下的文件**（层间契约守卫在 gateway，不在下载器；spec §7）。
 - **`update.json` 里某个字段是"可选"不等于"可以不填"**：今天它既没 `sha256` 也没 `sizeBytes`，
-  ⇒ 清单侧的完整性输入为空。Task 11 抬版本时**必须**把两项一起回填，否则 §8.2 那道 CI 比对闸等于没接线。
+  ⇒ 清单侧的完整性输入为空。但**回填不发生在抬版本号那一次提交**：v2.2.0 的签名包只有 CI 在 tag 上才产，
+  写 `update.json` 的那一刻哈希与字节数根本无从得知（填假值比空缺更坏 —— 假哈希 = 必然
+  `ChecksumMismatch` 的门禁死循环）。正确顺序是：**回填发生在 CI 出包之后那一次提交** ——
+  从 CI 日志/run 摘要里读实际 `sha256` 与 `sizeBytes`，补进 `update.json`，**并推 main（两份远端都要推）**。
+  README 发布手册第七节把这一步列成必做项，不是可选。
+  为什么必须填：`ApkDownloader` 的哈希闸写的是 `if (expected != null)` —— 清单不声明就等于这道闸不存在；
+  而 CDN 若不回 `Content-Length`，`isBodyComplete` 就只剩"非空即完整"这一条，
+  半截包会被当成功交给安装页，且报警只在 logcat 里（`adb logcat -s JianyiUpdate`）。
 - **版本号比较只许出现在 `UpdateDecision.kt` 一个文件里**（`decideUpdate` 与 `needsApkProbe` 共用
   `effectiveMinSupportedCode()`）。任何 Task 都不许在 UI/VM/仓库里再写一次 `>= versionCode` ——
   两处漂移的症状是"该探时没探 ⇒ Forced 静默变 Optional"，零日志零红测。
@@ -2260,7 +2268,7 @@ git commit -m "feat(update): APK 流式下载器，边下边算 sha256，坏包�
 >    真正没清洗的是**连续的点**，那条已在 Task 8 补上（`..` → `_`），理由写在函数 KDoc 里：
 >    它今天出不了目录靠的是 `"jianyi-"` 前缀恰好挡住 `..`，而一个没人依赖的前缀不算守卫。
 > 3. **`Failed` 放开返回键是刻意的**（`failed_stops_blocking_so_user_can_leave` 就是计划要的行为，别"修"回去）：
->    `gateHoldsPage(Failed)=false` 而 `gateIsForced(Failed)=true` 这个差一个分支是**接受**的不一致，
+>    `blocksUser(Failed, …)=false` 而 `gateIsForced(Failed)=true` 这个差一个分支是**接受**的不一致（那函数原名 `gateHoldsPage`），
 >    理由与"门禁不许被一次手动检查解除"为什么不矛盾，见 spec §7.1 与本文开头的 Global Constraints。
 
 **Files:**
@@ -2808,6 +2816,12 @@ Expected: 通过（`apkUrl` 的 tag 段与 `versionName` 一致）
 Run: `GRADLE_USER_HOME=E:/dev/gradle-home JAVA_HOME=E:/dev/jdk ./gradlew lint testDebugUnitTest assembleDebug assembleRelease`
 Expected: BUILD SUCCESSFUL；记录测试总数与 0 失败，并核对四个任务都不是 `UP-TO-DATE`/`FROM-CACHE`（缓存命中要在报告里如实说明）
 
+> 关于这里那句 `assembleRelease`，别把"构建绿"读成"出包成功"（2026-09-30 实测纠正过一次）：
+> 四个签名 secrets 都没配时 `signingConfigs.findByName("release")` 返回 null，AGP **不报错**，
+> 只产出 `app-release-unsigned.apk`（`apksigner verify` → `Missing META-INF/MANIFEST.MF`）。
+> 未签名的包装不上（安卓只允许同签名覆盖安装），所以 **release 出包属 CI 职责**（在 tag 上、配齐 secrets 才产）；
+> 本地这一项只证明"release 那条编译/混淆配置不报错"，不证明"能发版"。真正的红闸门是 workflow 里的签名检查步骤。
+
 - [ ] **Step 3: 真机回归（两台，`adb install -r -t`，绝不卸载）**
 
 逐条记录"实际看到什么"，不要写"应该没问题"：
@@ -2817,6 +2831,9 @@ Expected: BUILD SUCCESSFUL；记录测试总数与 0 失败，并核对四个任
 3. 手动在 Gitee 建 tag `v2.2.0` 发行版并上传 debug 之外那份签名 APK（或先传任意 `.apk` 占位）⇒ 同一步骤 2 的配置下**出现全屏门禁**。
 4. 门禁下按返回键 ⇒ 不退出（Task 8 的正向证据）。
 5. 点「立即更新」⇒ 进度条到 100% ⇒ 系统安装页弹出 ⇒ 装成功后版本变为 2.2.0、**数据仍在**（首页显示的还是那行旧缓存）。
+5b. **在安装页按一次取消** ⇒ 回到 App 仍然必须是全屏门禁（遮罩按住、返回键不放行、没有「以后再说」）。
+    这是 C1 唯一能在真机上观察的形式：`InstallResult.Launched` 只代表安装页弹出去了、不代表装完了，
+    而"单测里那条 `Launched ⇒ Gate` 断言在真实安装页上到底成不成立"只有这一条能回答。
 6. 断网点更新 ⇒ 失败文案 + 「重试」+「复制下载链接」；OriginOS/ColorOS 的"未知来源"引导页各截一张。
 7. 把 `sha256` 改成错值 ⇒ 下载完判 `ChecksumMismatch`，文案不提重试，且 `cacheDir/update/` 下不留文件。
 8. 窄屏最坏负载：把 `notes` 换成 80 个汉字，截图确认动作按钮与文案没被裁（这条专门防今天那个 CTA 被省略号吃掉的坑复发）。
@@ -2829,6 +2846,26 @@ git add app/build.gradle.kts update.json CHANGELOG.md
 git commit -m "chore(release): 2.2.0 / versionCode 9 —— 首个支持应用内更新的版本"
 git push origin feat/app-update && git push gitee feat/app-update
 ```
+
+- [ ] **Step 5: CI 出包**之后**回填 `sha256` / `sizeBytes`**（必做，不是可选）
+
+> 这一条原来写在"抬版本那次一起回填"，那句是**做不到的**：v2.2.0 的签名包只有 CI 在 tag 上才产，
+> 写 `update.json` 的那一刻哈希与字节数根本还不存在。填假值比空缺更坏 —— 假哈希 = 每次下载必然
+> `ChecksumMismatch`，而那是唯一一条"重试也不会好"的成因，硬门禁下没有任何出路。
+> 所以回填发生在**出包之后那一次提交**：
+
+```bash
+# 1) 从 CI run 摘要 `## 本次包体实测值` 读实际值（或第五节手动产物上用 sha256sum / stat -c %s）
+# 2) 把 sha256 与 sizeBytes 补进 update.json（只动这两个字段）
+git add update.json
+git commit -m "chore(release): 回填 v2.2.0 的 sha256 与 sizeBytes"
+git push origin main && git push gitee main     # 两份都要推：App 读的是 Gitee 那份 raw/main
+```
+
+不回填的后果（为什么这道闸现在等于没接线）：`ApkDownloader` 的哈希判据写的是 `if (expected != null)`，
+清单不声明就是**根本没参与**；那时完整性只剩响应的 `Content-Length`，CDN 一旦不回这个头就退化成
+"非空即完整"，半截包会被当成功交给安装页，而报警只在 logcat（`adb logcat -s JianyiUpdate`）。
+`UpdateManifestFileTest` 对"没声明"是**放行**的（可选字段），所以这一步不会有任何测试替你记得。
 
 ---
 

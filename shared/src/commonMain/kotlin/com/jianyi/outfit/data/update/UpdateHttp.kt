@@ -56,16 +56,29 @@ const val UPDATE_MANIFEST_URL =
  */
 class KtorUpdateHttp : UpdateHttp {
 
-    private val client = HttpClient(httpClientEngine()) {
-        install(HttpTimeout) {
-            connectTimeoutMillis = 8_000
-            requestTimeoutMillis = 10_000
-            socketTimeoutMillis = 10_000
+    /**
+     * 惰性建客户端（终审修复轮第 5 条，与 `ApkDownloader` 同一条理由）。
+     *
+     * 从前这里是 `private val client = HttpClient(...)`，而 `AppContainer` 在冷启动时
+     * **eager 构造** `KtorUpdateHttp()`（AppContainer.kt:158）—— `HttpClient(engine)` 会真的去起
+     * 引擎（OkHttp 的连接池与线程池），引擎起不来（类加载冲突、ROM 差异）的表现就是**开屏崩 App**。
+     * 而这条功能自己的态度从头到尾是 fail-open：`runCheck` 兜住任何异常按"拿不到清单"处理，
+     * 宁可这次不提示更新也不拦人、不崩。ApkDownloader 为同样的理由已经 `by lazy` 了，
+     * 这里不落齐就是"同一个风险在一个地方防了、在隔壁没防"。
+     * 惰性化之后最坏情况变成"点检查才失败"，而那个失败照旧被 catch 成 Unreachable。
+     */
+    private val client by lazy {
+        HttpClient(httpClientEngine()) {
+            install(HttpTimeout) {
+                connectTimeoutMillis = 8_000
+                requestTimeoutMillis = 10_000
+                socketTimeoutMillis = 10_000
+            }
+            // raw 域实测是 302 跳过去，不跟重定向就永远拿不到正文
+            followRedirects = true
+            // 自己判状态码：404 是"清单还没放"的正常情形，不该走异常路径
+            expectSuccess = false
         }
-        // raw 域实测是 302 跳过去，不跟重定向就永远拿不到正文
-        followRedirects = true
-        // 自己判状态码：404 是"清单还没放"的正常情形，不该走异常路径
-        expectSuccess = false
     }
 
     override suspend fun fetchManifest(url: String): ManifestFetch = try {

@@ -356,15 +356,25 @@ Gradle 构建**（根构建不 include 它），只为在 macOS 上验证玻璃�
 
 | 文件 | 字段 | 现在的值 | 说明 |
 |------|------|---------|------|
-| `app/build.gradle.kts` | `versionCode` / `versionName` | `8` / `2.1.2` | `versionCode` 整数**只增不减**，安卓按它判断能不能覆盖安装 |
-| `update.json` | `versionCode` / `versionName` | `8` / `2.1.2` | 决定"要不要提示更新"，必须与上面两处一致 |
+| `app/build.gradle.kts` | `versionCode` / `versionName` | `9` / `2.2.0` | `versionCode` 整数**只增不减**，安卓按它判断能不能覆盖安装 |
+| `update.json` | `versionCode` / `versionName` | `9` / `2.2.0` | 决定"要不要提示更新"，必须与上面一致 |
 | `update.json` | `minSupportedVersionCode` | `1` | 低于它的设备会被硬门禁（见第六节） |
-| `update.json` | `apkUrl` | `…/releases/download/v2.1.2/jianyi-2.1.2.apk` | tag 段与文件名都要跟着版本走 |
-| `update.json` | `sha256` / `sizeBytes` / `notes` | 未声明 | **可选**，前两个由 CI 出包后人工回填（第七节） |
+| `update.json` | `apkUrl` | `…/releases/download/v2.2.0/jianyi-2.2.0.apk` | tag 段与文件名都要跟着版本走 |
+| `update.json` | `sha256` / `sizeBytes` | **仍未声明** | 可选，但**必须在 CI 出包之后那一次提交里回填**（见下面「合并顺序的后果」与第七节） |
+| `update.json` | `notes` | 已写 | 卡片上那段更新说明 |
 
 只改一边一定会红：`UpdateManifestFileTest` 会读真实的 `update.json` 去对 `BuildConfig.VERSION_CODE` /
 `VERSION_NAME`，并检查 `apkUrl` 里的 `/download/v<versionName>/` 段 —— 这条锁专防"抬了版本号忘了改清单"
 （那种错的表现是**所有人永远收不到更新**，而单元测试、CI、日志全绿）。
+
+**合并顺序的后果（想清楚再推 main）**：上表那条锁意味着 `update.json` 的 versionCode/versionName
+**恒等于 `BuildConfig`**，于是清单不可能滞后于发版 —— **推到 main 的那一刻公告就生效**，
+而 APK 附件要等 CI 在 tag 上跑完（或你手动传完第五节）才真的在。中间那段窗口期旧设备读到的清单是
+"有新版本、但 `apkUrl` 探不到包"，判定层按规矩把它降级成**可跳过提示**（HEAD 探包是硬门禁的前提），
+所以不会把用户拦死 —— 但也不会有人真的收到"能装"的更新。
+
+因此顺序写死成：**先出包并确认附件可下载（第五节第 3 步那条 `curl -I` 落 2xx），再让清单生效**。
+如果流程上做不到（比如清单和 tag 在同一次推送里），就明确接受这段短窗口，别改代码去绕它。
 
 ### 二、`apkUrl` 的两条硬约束（写错 = 全世界收不到更新，且没有任何报错渠道）
 
@@ -444,7 +454,7 @@ git push origin main && git push gitee main  # 两份远端都推
 - 它**不能高于 `versionCode`**：判定层会用 `minOf` 钳到最新版，这个笔误在运行时被**静默吸收**
   （表现只是门禁比你想的更严），别处看不见，只有 `UpdateManifestFileTest` 会报。
 
-### 七、`sha256` / `sizeBytes` 为什么是可选字段，以及不回填的代价
+### 七、`sha256` / `sizeBytes` 为什么是可选字段，以及回填是**必做步骤**
 
 清单由人在抬版本号时**手写**，那一刻 APK 还不存在、哈希无从得知；定为必填就只能先填假值（校验必失败）
 或者让 CI 回写清单（CI 又没有 Gitee 写权限）—— 时序死结。所以口径是：
@@ -453,8 +463,27 @@ git push origin main && git push gitee main  # 两份远端都推
   连形状不对（不是 64 位小写十六进制）都算错 —— 那种写法会让解析器把整份清单判无效。
 - **没声明则跳过校验**并照常安装。代价是"下载完校验哈希"这道闸**等于不存在**。
 
-CI 每次发布都会把实际值打在日志与 run 摘要里（`## 本次包体实测值`），并留一条
-`::warning::update.json 未声明 sha256`。回填是发版动作的一部分，不是可选项。
+**回填发生在 CI 出包之后那一次提交**，不是抬版本号那一次（那一次哈希还不存在，说"抬版本时一起回填"
+是做不到的那句旧措辞，已改）。必做步骤：
+
+1. CI 在 tag 上跑完（或第五节手动传完附件），从 run 摘要 `## 本次包体实测值` / 日志里读实际
+   `sha256` 与 `sizeBytes`（手算用 `sha256sum` 与 `stat -c %s`）。
+2. 把这两个字段补进 `update.json`，**提交并推 main —— 两份远端都要推**（`origin` 与 `gitee`；
+   App 读的是 Gitee 那份，只推 GitHub 等于没回填）。
+3. 复核：`curl https://gitee.com/wuliao11541/WeatherOutfit/raw/main/update.json` 里能看见那两个字段。
+
+为什么不能省（这是这道闸在**生产数据上目前就是开着的**原因）：
+
+- `ApkDownloader` 的哈希闸写的是 `if (expected != null)` —— 清单不声明 `sha256`，"下载完校验哈希"
+  这件事**不是"没通过"，是根本没接线**。
+- 完整性判定现在只剩 `Content-Length` 一条依据。CDN 只要不回这个头（不同域名/不同跳转形态是可能的），
+  `isBodyComplete` 就退化成"非空即完整"，半截包会被当成功交给系统安装页，
+  表现为"解析软件包时出现问题"，而**报警只在 logcat 里**（`adb logcat -s JianyiUpdate`），用户侧零信号。
+- 声明之后 §8.2 那道"CI 把哈希与包比对，不一致就让 job 失败"才有输入可比 —— 否则它拿 `null` 比 `null`，
+  永远绿，等于没接线。
+
+回填**不要**填假值或凭印象估的值：假哈希 = 每次下载都必然 `ChecksumMismatch`，
+而那是唯一一条"重试也不会好"的成因，硬门禁下用户没有任何出路。
 
 ### 八、已知没跑过的部分（不假装已完成）
 
@@ -464,6 +493,14 @@ CI 每次发布都会把实际值打在日志与 run 摘要里（`## 本次包�
 - `foruda.gitee.com` 忽略 `Range`（实测），所以 APK 下载**没有断点续传**：中途失败就整文件重下。
 - 附件地址对 `HEAD` 答 200 是在**别人的仓库**上实测的（`beijing-jicang/yichenbao`），
   机制已证；我们自己第一个真 Release 出来后仍要按第五节第 3 步复核一次自己的地址。
+- **R8 / release 那条链路今天零证据**。本机没有签名 secrets，`assembleRelease` 虽然**绿**但产出的是
+  装不上的未签名包（实测包里没有 `META-INF/MANIFEST.MF`），所以第九节第 7 项那一次观察还没做过。
+  `app/proguard-rules.pro` 新加的 `-keep class com.jianyi.outfit.data.update.** { *; }` **本轮量过它确实承重**
+  （摘掉重出包：mapping 里 `UpdateManifest -> a3.x`、`UpdateManifest$$serializer -> a3.v`；加回去：两个名字都保持原样），
+  但**没有**量到"不加就会让 `parse()` 返回 null"：kotlinx.serialization 的元素名是编译期写进生成 serializer 的
+  字符串常量，与 Gson 那种字段名反射不是一回事，而 kotlinx 自带的 R8 规则本来就在合并配置里。
+  所以这条按"保险 + 与既有两条同类"记账，别记成"修好了一个正在发生的故障"。
+  真正的空白是**整条 release 侧没有任何运行时证据** —— 那要等第一个 CI 签名包（第九节第 7 项）才关得掉。
 
 ### 九、发版前怎么在真机上看到门禁（不改 min、不等发包）
 
@@ -501,10 +538,24 @@ adb install -r -t app/build/outputs/apk/debug/app-debug.apk    # -r 覆盖安装
 3. 点「立即更新」：进度条按 `Content-Length` 真实往上涨（那个附件实测 58,545,336 B ≈ 55.8 MB，
    请接着 Wi-Fi）。清单没声明 `sizeBytes` 不影响这根条 —— 分母本来就以响应头为准。
 4. 走到「系统安装页弹出」就停手：附件是**别人仓库的 App**，真按安装就装成那个 App 了。
+   **并在安装页按一次取消/返回**：回到 App 时**必须还是全屏门禁**（遮罩仍按住、返回键仍不放行、
+   卡片上没有「以后再说」）。这一条是 C1 唯一能在真机上观察的形式 —— 单测里它是一条
+   `Launched ⇒ Gate` 的断言，而真实安装页弹出去之后 VM 收到什么，只有这里看得见。
 5. 拒绝「安装未知应用」授权 ⇒ 系统设置页被打开，而**门禁仍然是门禁**（不许退成可跳过提示）。
 6. 把地址换成一份解析不了的内容 ⇒ 界面上什么都不显示（不拦人是规矩），
    而 logcat 里那条「清单读到了但解析失败」是唯一线索。
-7. 演练完用不带这个参数的 `assembleDebug` 重装回去；`update.test.json` 留在分支上，
+7. **装一次 `assembleRelease` 的产物，再读一次 `adb logcat -s JianyiUpdate`**。上面 1–6 跑的全是 debug 包，
+   而 debug 不混淆 ⇒ **release 专属的那一类故障（R8 改名/shrink 之后的行为）在这节所有项目里永远看不见**。
+   这一项看的是冷启动那条链落在哪一种成因上：logcat 里有「清单读到了但判无效/解析失败」= 混淆把解析弄坏了；
+   什么都不显示且没有该行 = 根本没查或平台不支持。**注意别把这一项的理由记成"不加 keep 清单就会解不出来"**：
+   `UpdateManifest` 走的是 kotlinx.serialization，元素名是编译期写进生成 serializer 的字符串常量，
+   本轮实测摘掉 keep 重出包后类名确实被改成 `a3.x` 而这条症状并不成立（详见 `app/proguard-rules.pro` 那段）。
+   这一项真正的价值是把 release 侧从"零证据"变成"有证据"。
+   如实写明边界：**release 出包属 CI 职责**。本机四个签名 secrets 一个都没配，
+   `assembleRelease` 会**绿着**产出 `app-release-unsigned.apk`（AGP 不报错，`apksigner verify`
+   报 `Missing META-INF/MANIFEST.MF`），而未签名的包**装不上**（安卓只允许同签名覆盖安装），
+   所以这一项要在 CI 于 tag 上产出的签名包上做。
+8. 演练完用不带这个参数的 `assembleDebug` 重装回去；`update.test.json` 留在分支上，
    **永远不要**把它的内容写进 `update.json` 或推到 main。
 
 前提：这台设备能访问 Gitee。`apkUrl` 用第三方仓库的地址是因为我们自己的第一个带附件 Release

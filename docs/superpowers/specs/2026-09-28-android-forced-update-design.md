@@ -32,7 +32,7 @@
 | 发布链路 | App 侧 + CI 自动发布到 Gitee |
 | APK 到手方式 | App 内下载 + 进度条 + 拉起系统安装页 |
 | 检查时机 | 冷启动一次 + 设置页「检查更新」手动入口 |
-| 存量用户 | 基本没有外部用户，不为"旧包签名不一致"设计专门分支，只给一句提示 |
+| 存量用户 | 基本没有外部用户，不为"旧包签名不一致"设计专门分支。**代码里也没有那句提示**（终审修复轮把文档对齐代码，不改代码）：`UpdateCopy.failureText` 只有四种成因 —— `Network` / `ChecksumMismatch` / `Io` / `NoSpace`，没有"签名不符"这一种；签名不匹配是**系统安装页**自己报的，App 侧看到的仍然是 `Launched`（安装页弹出去了），而 §7 那条 C1 保证这一刻门禁不松，所以它不会被误读成"已经装上了" |
 
 ---
 
@@ -63,7 +63,8 @@
    并且"与实测不符"必须打一条 warning（走 §5 那条既有注入 sink），因为这个漂移否则永远没人知道。
 10. **生产 `update.json` 今天既没有 `sha256` 也没有 `sizeBytes`**（2026-09-30 复核仓库根那份文件：只有 versionCode/versionName/minSupportedVersionCode/apkUrl/notes 五项）。
     ⇒ 清单侧的完整性输入是空的，全靠 §3.9 的 `Content-Length` 兜住；万一某个 CDN 形态不给这个头，就只剩"非空即完整"这一条。
-    **这个状态由 Task 11 消除**：抬版本那次必须把两个字段一起回填（与 §8.2 那道"哈希/字节数与包比对，不一致就让 job 失败"是同一次），
+    **这个状态由"CI 出包之后那一次提交"消除**（不是抬版本号那一次 —— 那一刻签名包还不存在，哈希无从得知）：
+    从 CI 日志/摘要读实际值，补进 `update.json` 并推 main（两份远端），README 发布手册第七节列成必做步骤。
     否则 §9 那条仓库自校验用例仍然绿，而两道闸有一道是开着的。
 
 ---
@@ -178,6 +179,10 @@ UI 状态：`Idle → Checking → (Hidden | OptionalCard | Gate) → Downloadin
 2. `forcedThisLaunch` **只进不出**：这次冷启动挂过门禁之后，一次失败的检查（手动「检查更新」恰好断网）
    不许把状态打回 `Hidden` —— 门禁不许被用户随手一点解除。
 
+还有第三力，方向与第 1 条相反、容易被第 1 条的措辞顺手"统一"掉（终审修复轮 C1）：
+**安装页弹出去（`InstallResult.Launched`）不算失败也不算装完**，强制那一档必须仍然留在 `Gate`。
+详见 §7 那条与 §7.1 里"失败逃生 ≠ 成功绕过"。
+
 粘滞的实现**不能**读"当前状态是不是 `Gate`"：下载一开始状态就变成 `Downloading`，那一刻恒 false，
 `Downloading/Failed` 的 `forced` 全丢 ⇒ 下载中途按一次返回就绕过门禁（评审给过这条修法，被否）。
 
@@ -209,20 +214,33 @@ UI 状态：`Idle → Checking → (Hidden | OptionalCard | Gate) → Downloadin
 - 逃生口（`Failed` 与权限被拒时都给出）：「重试」+「复制下载链接」。复制链接是最后一道保险 —— 用户可以拿去浏览器或另一台设备下。
   没有 `apkUrl` 可复制时，那颗按钮就不摆（这条过滤现在在 `gateActions(state, hasUrl)` 里，不在 UI 侧 `.filterNot`：
   两边各写一份的结果是"遮罩按住整页而按钮一颗不剩"，见 §6）。
+- **`InstallResult.Launched` ≠ 装完了**（终审修复轮 C1，2026-09-30）：这个返回值的语义只有一个 ——
+  `AndroidUpdateGateway` 成功 `startActivity`、安装页弹到了前台。安卓没有"安装完成"的回调，而那一刻包还没装上。
+  所以强制那一档在 `Launched` 时**必须留在 `Gate`**（与 `PermissionMissing` 同一处理），非强制档才 `Hidden`。
+  曾经的写法是 `Launched -> Hidden`，症状是"门禁 → 下完 55MB → 安装页弹 → 遮罩与返回键同帧松开 →
+  用户在安装页按取消 → 回到一个完全没有门禁的旧版，直到杀进程"，而全程零红：
+  `runCheck` 里"禁止 Gate→Hidden"只管检查路径、`checkedThisLaunch` 与 `LaunchedEffect(Unit)` 都不再触发第二次检查，
+  这次启动内没有任何东西会把它挂回来。那条用例（`launched_install_hides_the_gate`）还把行为钉成了期望。
+  **留在门禁里不会把"真装成功了"的用户锁在外面**：装成功必然由安装器杀掉本进程，下次冷启动是新 VM、
+  判定层读到 versionCode 已达标 ⇒ `UpToDate` ⇒ 门禁自然消失（落盘没有任何"已跳过/已装"状态需要复位）。
 
 ### 7.1 失败态不锁死用户（**刻意的语义，不是遗漏**）
 
 计划第 5 行的 Goal 写着"任何失败都能退出而不锁死用户"，这一句在代码里是三处一致的实现，改任何一处都要同时核对另外两处：
 
-| 状态 | 遮罩 + 吃点击 `gateHoldsPage` | 返回键 `shouldBlockBack` | 文案分量 `gateIsForced` | 关闭入口 |
+| 状态 | 遮罩 + 吃点击 `UpdateUiState.blocksUser(hasUrl)` | 返回键 `shouldBlockBack(state, hasUrl)` | 文案分量 `gateIsForced` | 关闭入口 |
 |---|---|---|---|---|
-| `Gate` | 按住 | 吞 | 门禁那一套 | 无 |
-| `Downloading(forced=true)` | 按住 | 吞 | 门禁那一套 | 无 |
+| `Gate`（含"安装页已弹出去"那一刻） | 按住 | 吞 | 门禁那一套 | 无 |
+| `Downloading(forced=true)` | 按住（`hasUrl` 为假时放开，否则零按钮） | 同上 | 门禁那一套 | 无 |
 | `Failed(forced=true)` | **放开** | **放开** | **门禁那一套** | 无 |
 
 - **`Failed` 放开是刻意的**：硬门禁 + 下载失败时把用户锁在屏幕上，正是本功能最要避免的"变砖"形态
   （下不下来、又走不掉，只能杀进程）。放开之后卡片仍然给「重试」与「复制下载链接」，逃生口在那里，不在返回键上。
-- **`gateHoldsPage=false` 而 `gateIsForced=true` 这个差一个分支是接受的**（Task 8 实现时发现的这条不一致）：
+- **但这一条不适用于 `Launched`（终审修复轮 C1，别把它当挡箭牌）**：§7.1 放开的是"**失败逃生**"，
+  而"安装页弹出去之后状态退回 `Hidden`"是"**成功之后绕过**"——包就在用户手边、只差那一步他没按，
+  按取消回来就是一个没有门禁的旧版。两类不同，结论相反：`Failed` 放开、`Launched` 留在 `Gate`。
+  **也不许顺手把 `Failed` 改回锁死** —— 那正是本节存在的原因。
+- **`blocksUser=false` 而 `gateIsForced=true` 这个差一个分支是接受的**（Task 8 实现时发现的这条不一致；那函数原名 `gateHoldsPage`）：
   文案分量决定"标题说什么、有没有关闭入口"，放开点击/返回决定"退得出去吗"，是两件事。
   合并前两条会让下载失败之后仍然按住用户；合并后两条会给 `Failed` 摆一颗按下去毫无反应的「以后再说」
   （VM 的 `dismissOptional()` 只认 `OptionalCard` 那一态）。两种合并都有具体症状，所以分开写、分开测。
@@ -300,7 +318,7 @@ UI 状态：`Idle → Checking → (Hidden | OptionalCard | Gate) → Downloadin
 | 附件名被小写化 | 已实测（`attname` 保留原名） | `apkUrl` 里的小写文件名按实际填，别靠大小写区分 |
 | 内容审核字段 `censor_failed` | 存在，行为未知 | 首次发布后检查附件是否可下载 |
 | 门禁 + 源不可达 | 设计已消解 | HEAD 探包 + 清单无效即 Unreachable |
-| **生产 `update.json` 当前无 `sha256` 也无 `sizeBytes`**（§3.10） | **今天就是这样** | 完整性只能靠响应的 `Content-Length`；若某个 CDN 形态连这个头也不给，就只剩"非空即完整"这一条 ⇒ **T11 抬版本时必须把两项一起回填**，否则 §8.2 那道 CI 比对闸等于没接线 |
+| **生产 `update.json` 当前无 `sha256` 也无 `sizeBytes`**（§3.10） | **今天就是这样** | 完整性只能靠响应的 `Content-Length`；若某个 CDN 形态连这个头也不给，就只剩"非空即完整"这一条 ⇒ 回填发生在 **CI 出包之后那一次提交**（那之前哈希无从得知，"抬版本时一起回填"是做不到的一句话），README 发布手册第七节把它列成必做步骤 |
 | `ApkDownloader.openBody`（Ktor 三跳接线那几行） | 无自动化覆盖 | 判定层全部挪进 `downloadEvents` 之后，剩下没锁的只有"GET/重定向/引擎"这几行；`ApkDownloadFlowTest` 用假 body 覆盖了它之上的每一条判据。真机回归第 4/6 项是唯一证据 |
 | 容器接线（`AppContainer` 里 `installer = ApkDownloader(...)`） | 无自动化覆盖 | 写错成 `UnsupportedInstaller` 时 195 条全绿而真机永远下不下来 —— 台账里已记为"只能靠读 diff 与真机确认"的那一处 |
 | 遮罩盖不住 `Dialog`/`Popup`（独立 window，§7.1 末条） | 已知并接受 | 拦人靠遮罩吃点击 + Activity 侧返回键，二者都不依赖"盖住 Dialog"；以后给更新流程加 Dialog 时要重新评估 |
