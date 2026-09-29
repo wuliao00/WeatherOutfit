@@ -64,7 +64,14 @@ sealed interface DownloadEvent {
  * 就会出现"两处都能装、只有一处管权限"。
  */
 interface ApkInstaller {
-    /** 实现方必须在下载过程中发至少一条 [DownloadEvent.Progress]（每 1–2 次 flush 一条即可） */
+    /**
+     * 实现方必须在下载过程中发至少一条 [DownloadEvent.Progress]。
+     *
+     * 节奏由 androidMain 的 ApkDownloader 定：**每累计 512KB 发一条**
+     * （`PROGRESS_CHUNK_BYTES`，读取块本身是 64KB，所以不是"每 flush 一次一条"），
+     * 尾巴不足一个 512KB 时收尾再补发一条。按 64KB 块发会让门禁卡片每秒重组十几次，
+     * 只在结尾发一条等于没发 —— 上面那段历史就是这么来的。
+     */
     fun download(manifest: UpdateManifest): Flow<DownloadEvent>
 }
 

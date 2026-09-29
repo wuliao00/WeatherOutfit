@@ -11,6 +11,14 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 开机自启：重启后对齐每日推送的 WorkManager 调度时刻 -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!--
+      应用内更新：Android 8+ 的「安装未知应用」是特殊权限（appops），不走 requestPermissions()——
+      那条 API 对它永远返回 deny，写进代码只会让人以为申请过了。
+      漏这一条的症状既不是编译失败也不是测试变红：PackageManager 没有这项能力时
+      canRequestPackageInstalls() 恒 false ⇒ 用户拒绝/没被弹窗过一次就**永远停在权限引导页**，
+      而门禁那一侧看起来完全正常（Task 4 的台账把这条登记成了 Task 8 的验收到场项）。
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:name=".WeatherOutfitApp"
@@ -48,6 +56,27 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+
+        <!--
+          应用内下载的 APK 落在 cacheDir/update/ 下，要把它交给**另一个进程**（系统安装器）读，
+          只能给 content:// URI：Android 7+ 把 file:// URI 交出去会抛 FileUriExposedException，
+          表现是「下完了、点立即更新什么都没发生」，而异常只在 logcat 里。
+          - authorities 用 ${applicationId}.fileprovider，AndroidUpdateGateway 里拼的那串必须逐字一致，
+            对不上的症状是 getUriForFile 抛 IllegalArgumentException；
+          - grantUriPermissions=true 才让 Intent 上的 FLAG_GRANT_READ_URI_PERMISSION 有意义
+            （没有它安装器拿到 URI 也读不到文件）；
+          - exported=false：不对外提供，只有被临时授权的那一次读取能进来。
+          能暴露哪些目录不写在这里，写在 @xml/file_paths（只开 update 一层，不用 root-path）。
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider 能暴露的目录清单（对应 AndroidManifest 里那个 provider 的 meta-data）。
+
+  必须正好覆盖 Task 7 的落盘位置：ApkDownloader 把包写在
+  `context.cacheDir/update/jianyi-<versionName>.apk`，
+  而 cache-path 的 path 是相对 cacheDir 的，所以这里写 `update/`。
+
+  两种"编译过、单测全绿、真机装不上"的配法，都记在这里免得再踩：
+  1. 只配 files-path / external-path（或把 path 写成 `.` 之外的别的粒度）：
+     对 cache 下的文件 getUriForFile 会抛
+     IllegalArgumentException("Failed to find configured root that contains ...")，
+     我们的 install() 把它折成 InstallResult.Failed，用户看到的是"写入失败，请清理手机存储"，
+     而真正坏的是这一行配置；
+  2. 图省事写 root-path 指向整个文件系统：那等于把应用可读到的所有文件交给安装器进程，
+     而这个目录里有 Room 数据库与 DataStore 偏好。
+  path 末尾的斜杠是 FileProvider 的要求：它按"这是一个目录"来解析。
+-->
+<paths>
+    <cache-path name="updates" path="update/" />
+</paths>

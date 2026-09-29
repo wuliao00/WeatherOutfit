@@ -75,10 +75,17 @@ private const val SPACE_FACTOR_DEN = 2L
  * 所以只保留字母数字与 `._-`，其它换成下划线 —— `../x` 那种值不该有能力走出 update 目录。
  * 选清洗而不是拒绝，是因为这个字段对下载本身毫无作用（人读的是清单里那一份），
  * 拒绝会把一次笔误放大成"门禁下什么都没有"。
+ *
+ * 连续的点单独再夹一次，理由不是"白名单漏了它"（`.` 本来就在白名单里），而是
+ * **它今天出不了目录靠的是 `"jianyi-"` 这个前缀恰好挡住了 `..`**：一个没人依赖的前缀
+ * 不算守卫，哪天改文件名口径它就会静默变成 `cacheDir/update/` 之外的路径，
+ * 而那时表现是 Task 8 的 `install()` 抛 `IllegalArgumentException`，归因链断在最难查的一端。
+ * 影响面为零：真实版本号里不会出现两个连续的点。
  */
 fun apkFileNameFor(versionName: String): String {
     val safe = versionName.map { if (it.isLetterOrDigit() || it == '.' || it == '_' || it == '-') it else '_' }
         .joinToString("")
+        .replace("..", "_")
     return "jianyi-$safe.apk"
 }
 

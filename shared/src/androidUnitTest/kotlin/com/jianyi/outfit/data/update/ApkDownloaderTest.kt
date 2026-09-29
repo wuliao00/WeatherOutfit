@@ -138,6 +138,31 @@ class ApkDownloaderTest {
         assertTrue(name.startsWith("jianyi-") && name.endsWith(".apk"), "文件名形状变了：$name")
     }
 
+    /**
+     * Task 8 授权补的守卫：连续的点也要夹掉。
+     *
+     * 现有实现把 `/` 与 `\` 夹成了下划线（白名单之外一律 `_`），所以真正的洞不是分隔符，
+     * 而是**点号被留着**：`../x` 会变成 `jianyi-.._x.apk`。它今天出不了目录，靠的是
+     * `"jianyi-"` 这个前缀恰好挡住了 `..` —— 而"某个没人依赖的前缀"不算守卫：
+     * 哪天改文件名口径（换前缀、去掉前缀）症状就回来了，且表现为 APK 落到 `cacheDir/update/`
+     * 之外，而 FileProvider 那一层只报一句 `install()` 失败，归因链断在最难查的一端。
+     * 所以这里显式夹掉 `..`，并把三件事一起钉住：没有分隔符、没有连续的点、
+     * 拼出来的路径解析后仍在 update 这一层里。
+     */
+    @Test fun a_traversal_version_name_resolves_inside_the_update_dir() {
+        val dir = File("update")
+        val dirPath = dir.canonicalFile.path + File.separator
+        for (version in listOf("../x", "..\\..\\x", ".././../x", "..", "....", "2.2.0")) {
+            val name = apkFileNameFor(version)
+            assertTrue('/' !in name && '\\' !in name, "清洗后仍带路径分隔符：$name")
+            assertFalse(".." in name, "清洗后仍带连续的点：$name")
+            assertTrue(
+                File(dir, name).canonicalFile.path.startsWith(dirPath),
+                "解析到了 update 目录之外：$name -> ${File(dir, name).canonicalPath}"
+            )
+        }
+    }
+
     // ---- 响应体长度：没有异常也可能只下一大半 ----
 
     /**
