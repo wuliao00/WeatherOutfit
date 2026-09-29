@@ -1972,14 +1972,25 @@ git commit -m "feat(update): 门禁层挂在 RootScreen 之上，文案与进度
 
 `shared/src/androidUnitTest/kotlin/com/jianyi/outfit/data/update/ApkDownloaderTest.kt`：
 
+> **派发前必读的两条校正（Task 3 修复轮核实）**：
+> 1. **用 `kotlin.test`，不要用 `org.junit.*`**。`shared` 的测试依赖只声明了
+>    `kotlin("test")` 与 `kotlinx.coroutines.test`，junit4 是否能靠传递依赖解析出来**没有验证过**；
+>    而本仓库所有既有 shared 测试都是 kotlin.test。顺手也避开断言参数顺序那个坑
+>    （kotlin.test 是 `assertEquals(expected, actual)`，`assertTrue(actual, message)`）。
+> 2. **`shared/src/androidUnitTest/` 这个目录现在不存在**，是新建的。
+>    如果 KGP 不认这个 source set 名字，结果不是报错而是**这条测试被静默忽略**：
+>    构建绿、0 条新用例。所以跑完后必须验证
+>    `shared/build/test-results/testDebugUnitTest/TEST-*ApkDownloaderTest.xml` **存在**且
+>    `tests="N"` 的 N ≥ 用例数，不能只看 `BUILD SUCCESSFUL`。
+
 ```kotlin
 package com.jianyi.outfit.data.update
 
 import java.io.File
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
-import org.junit.Test
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * 这里测的是"下完之后判断对不对"，不是网络。
@@ -2001,7 +2012,7 @@ class ApkDownloaderTest {
 
     @Test fun empty_file_hashes_as_empty_string_input() {
         val f = File.createTempFile("apk", ".bin")
-        f.writeBytes(newByteArray(0))
+        f.writeBytes(ByteArray(0))
         assertEquals(
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
             sha256Of(f)
