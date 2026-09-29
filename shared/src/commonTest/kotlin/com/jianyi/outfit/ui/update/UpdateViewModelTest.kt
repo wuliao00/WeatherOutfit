@@ -59,12 +59,12 @@ private class FakeChecker(private val decision: UpdateDecision) : UpdateChecker 
 }
 
 private class FakeInstaller(
-    private val outcome: DownloadOutcome = DownloadOutcome.Success(APK_PATH)
+    private val outcome: DownloadEvent = DownloadEvent.Success(APK_PATH)
 ) : ApkInstaller {
     var downloads = 0
     var seenManifest: UpdateManifest? = null
 
-    override fun download(manifest: UpdateManifest): Flow<DownloadOutcome> {
+    override fun download(manifest: UpdateManifest): Flow<DownloadEvent> {
         downloads++
         seenManifest = manifest
         return flowOf(outcome)
@@ -79,12 +79,31 @@ private class FakeInstaller(
  * runTest 收尾时留下未完成的协程。
  */
 private class PendingInstaller : ApkInstaller {
-    val outcome = CompletableDeferred<DownloadOutcome>()
+    val outcome = CompletableDeferred<DownloadEvent>()
     var downloads = 0
 
-    override fun download(manifest: UpdateManifest): Flow<DownloadOutcome> {
+    override fun download(manifest: UpdateManifest): Flow<DownloadEvent> {
         downloads++
         return flow { emit(outcome.await()) }
+    }
+}
+
+/**
+ * 会发进度事件的下载器：`Progress` 是这条链上唯一能让进度条动起来的东西。
+ *
+ * 存在的理由是一段真实的接口缺陷：`ApkInstaller` 原本只有 `Success | Failure` 两个终态，
+ * VM 之后再也没有任何东西给 `Downloading.done` 赋非 null 值 —— 于是 24MB 的下载里
+ * 进度条从 0% 一路死到装完，而测 `progressOf`/`sizeText` 算术的 UpdateCopyTest 照样全绿。
+ * 这三条用例（下面三条）就是把"没人发 Progress"和"发了没人显示"这两半钉住。
+ */
+private class ProgressInstaller(
+    private val events: List<DownloadEvent>
+) : ApkInstaller {
+    var downloads = 0
+
+    override fun download(manifest: UpdateManifest): Flow<DownloadEvent> {
+        downloads++
+        return flowOf(*events.toTypedArray())
     }
 }
 
@@ -264,7 +283,7 @@ class UpdateViewModelTest {
         val vm = checkedVm(
             this,
             UpdateVerdict.Forced,
-            FakeInstaller(DownloadOutcome.Failure(DownloadFailure.ChecksumMismatch))
+            FakeInstaller(DownloadEvent.Failure(DownloadFailure.ChecksumMismatch))
         )
         vm.startDownload()
         advanceUntilIdle()
@@ -276,7 +295,7 @@ class UpdateViewModelTest {
     }
 
     @Test fun retry_reissues_download() = runTest {
-        val installer = FakeInstaller(DownloadOutcome.Failure(DownloadFailure.Network))
+        val installer = FakeInstaller(DownloadEvent.Failure(DownloadFailure.Network))
         val vm = checkedVm(this, UpdateVerdict.Forced, installer)
         vm.startDownload()
         advanceUntilIdle()
@@ -299,7 +318,7 @@ class UpdateViewModelTest {
         assertEquals(24_115_200L, s.total)
         assertEquals(BIG_MANIFEST, s.manifest)
         // 收尾：让挂起的那次下载落地，顺带确认它真能走出 Downloading
-        installer.outcome.complete(DownloadOutcome.Success(APK_PATH))
+        installer.outcome.complete(DownloadEvent.Success(APK_PATH))
         advanceUntilIdle()
         assertIs<UpdateUiState.Hidden>(vm.state.value)
     }
@@ -311,7 +330,7 @@ class UpdateViewModelTest {
         vm.startDownload()
         val s = assertIs<UpdateUiState.Downloading>(vm.state.value)
         assertFalse(s.forced, "非强制的下载中途不该拦返回键")
-        installer.outcome.complete(DownloadOutcome.Success(APK_PATH))
+        installer.outcome.complete(DownloadEvent.Success(APK_PATH))
         advanceUntilIdle()
     }
 
@@ -331,7 +350,7 @@ class UpdateViewModelTest {
         vm.startDownload()
         vm.retry()
         assertEquals(1, installer.downloads, "还在下的时候再点必须是空操作")
-        installer.outcome.complete(DownloadOutcome.Failure(DownloadFailure.Network))
+        installer.outcome.complete(DownloadEvent.Failure(DownloadFailure.Network))
         advanceUntilIdle()
         assertIs<UpdateUiState.Failed>(vm.state.value)
         vm.retry()
@@ -386,5 +405,76 @@ class UpdateViewModelTest {
         vm.forceCheck()
         advanceUntilIdle()
         assertIs<UpdateUiState.Gate>(vm.state.value)
+    }
+
+    /**
+     * Progress 事件必须真的落到 `Downloading.done` 上。
+     *
+     * 这条锁的是整条链上最容易"各自都没错、拼起来是死的"的一环：
+     * `ApkInstaller` 原本只有 `Success | Failure` 两个终态，VM 之后再也没有任何东西给
+     * `done` 赋非 null 值 —— 于是 24MB 的下载里进度条从 0% 一路死到装完，
+     * 而 `UpdateCopyTest` 测的 `progressOf`/`sizeText` 算术全都对、VM 测的终态跳转也全都对。
+     * 只有"发 Progress"和"显示 Progress"分开各钉一条，中间那段才不可能再断。
+     */
+    @Test fun progress_event_moves_the_bar() = runTest {
+        val installer = ProgressInstaller(listOf(DownloadEvent.Progress(12_000_000L, 24_000_000L)))
+        val vm = checkedVm(this, UpdateVerdict.Forced, installer)
+        vm.startDownload()
+        advanceUntilIdle()
+        val s = vm.state.value
+        assertIs<UpdateUiState.Downloading>(s)
+        assertEquals(12_000_000L, s.done, "进度事件没落到状态上，UI 拿到的就是一根不动的条")
+        assertEquals(24_000_000L, s.total)
+        assertTrue(s.forced, "门禁下下载中仍然是门禁态 —— Task 8 的返回键拦截读的就是这个字段")
+        assertEquals(1, installer.downloads)
+    }
+
+    /**
+     * 清单没声明 `sizeBytes` 时不许编一个总数出来。
+     *
+     * 画一根"未知总量却从 0% 往上涨"的条，比走不确定态更让人以为卡住了 ——
+     * 这条断言 `total` 保持 null，是给 Task 6 的进度条留的接口契约。
+     */
+    @Test fun progress_with_unknown_total_keeps_the_bar_indeterminate() = runTest {
+        val noSize = UpdateManifest(9, "2.2.0", 9, "https://gitee.com/x.apk")
+        val installer = ProgressInstaller(listOf(DownloadEvent.Progress(5_000_000L, null)))
+        val vm = checkedVm(this, UpdateVerdict.Forced, installer, manifest = noSize)
+        vm.startDownload()
+        advanceUntilIdle()
+        val s = vm.state.value
+        assertIs<UpdateUiState.Downloading>(s)
+        assertEquals(5_000_000L, s.done)
+        assertNull(s.total, "清单没给 sizeBytes 就不能凭空造一个总数出来")
+    }
+
+    /**
+     * 判定实现抛异常时：按"拿不到清单"处理 —— 不崩、不拦人、留一条日志。
+     *
+     * `UpdateChecker` 是个接口，今天的实现三条路径都自带 catch，但将来任何一个实现抛出，
+     * 容器那层的 SupervisorJob 不吞它 ⇒ **冷启动路径上直接崩 App**。
+     * 而"崩一次"和"这一次不提示更新"之间不需要犹豫。
+     *
+     * 这条用例同时是那个 catch 的红绿证明：把 try/catch 摘掉它就会红
+     * （runTest 会把 scope 里未捕获的异常算成失败），所以它不是装饰。
+     */
+    @Test fun a_throwing_checker_fails_open_instead_of_crashing() = runTest {
+        val logs = mutableListOf<String>()
+        val vm = UpdateViewModel(
+            appVersion = AppVersion(8, "2.1.2"),
+            checker = object : UpdateChecker {
+                override suspend fun check(currentVersionCode: Int): UpdateDecision =
+                    throw IllegalStateException("fake checker blew up")
+            },
+            installer = FakeInstaller(),
+            gateway = FakeGateway(),
+            scope = this,
+            logWarning = { logs.add(it) }
+        )
+        vm.checkOnce()
+        advanceUntilIdle()
+        assertIs<UpdateUiState.Hidden>(vm.state.value)
+        assertEquals(UpdateVerdict.Unreachable, vm.lastVerdict.value)
+        assertEquals(1, logs.size)
+        assertTrue(logs.single().contains("fake checker blew up"), "日志要带上原因，否则等于没留痕：$logs")
     }
 }

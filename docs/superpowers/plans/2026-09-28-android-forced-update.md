@@ -1042,9 +1042,26 @@ git commit -m "feat(update): AppUpdateGateway 能力接口，iOS 空实现，版
 - Create: `shared/src/commonMain/kotlin/com/jianyi/outfit/ui/update/DownloadState.kt`
 - Test: `shared/src/commonTest/kotlin/com/jianyi/outfit/ui/update/UpdateViewModelTest.kt`
 
+> **修订（Task 5 实现后，Task 6/7 派发前必读）**
+> 1. `DownloadState.kt` 没有单独建：`DownloadFailure`/`DownloadEvent`/`ApkInstaller` 三个声明都放在
+>    `UpdateViewModel.kt` 里，**包名不变**（`com.jianyi.outfit.ui.update`），所以 T6/T7/T8 按包导入不受影响。
+> 2. **下载接缝从 `Flow<Success|Failure>` 改成了 `Flow<Progress|Success|Failure>`。**
+>    原因是实现者发现并要求裁决的一处"每一层各自都没错、拼起来是死的"：
+>    接缝只回终态 ⇒ VM 里 `Downloading.done` 再也没有任何东西赋非 null 值 ⇒
+>    24MB 的下载全程一根 0% 死条，而 `UpdateCopyTest`（算 `progressOf`/`sizeText`）全绿、
+>    VM 的终态跳转用例也全绿。**Task 7 的 `ApkDownloader` 必须真的发 Progress**
+>    （每 flush 1–2 次发一条即可，别每个字节发一条），Task 6 的进度条必须显示 `state.done`。
+>    两侧各有用例钉住：`progress_event_moves_the_bar`、
+>    `progress_with_unknown_total_keeps_the_bar_indeterminate`。
+> 3. VM 多了第 6 个构造参数 `logWarning`（默认 `::logUpdateWarning`）：
+>    `runCheck` 现在 try/catch 住 `checker.check`，抛出时按 Unreachable 处理、不拦人、留痕。
+>    理由：`UpdateChecker` 是接口，容器那层是 `SupervisorJob`（不吞异常），
+>    少这个 catch 就是"冷启动路径上崩 App"。用例 `a_throwing_checker_fails_open_instead_of_crashing`
+>    同时是这个 catch 的红绿证明（摘掉 try/catch 它就红）。
+
 **Interfaces:**
 - Consumes: `UpdateRepository.check`（Task 3）、`AppUpdateGateway` / `AppVersion`（Task 4）
-- Produces: `sealed interface UpdateUiState { Hidden; OptionalCard(manifest); Gate(manifest); Downloading(manifest, done: Long?, total: Long?, forced: Boolean); Failed(manifest, reason: DownloadFailure, forced: Boolean) }`；`enum class DownloadFailure { Network, ChecksumMismatch, Io, NoSpace }`；`sealed interface DownloadOutcome { Success(path: String); Failure(reason: DownloadFailure) }`；`interface ApkInstaller { fun download(manifest: UpdateManifest): Flow<DownloadOutcome> }`；`class UpdateViewModel(appVersion: AppVersion, checker: UpdateChecker, installer: ApkInstaller, gateway: AppUpdateGateway, scope: CoroutineScope) { val state: StateFlow<UpdateUiState>; val lastVerdict: StateFlow<UpdateVerdict?>; fun checkOnce(); fun forceCheck(); fun dismissOptional(); fun startDownload(); fun retry(); fun apkUrl(): String? }`；`object UnsupportedInstaller : ApkInstaller`；`fun newUpdateViewModel(...): UpdateViewModel`
+- Produces: `sealed interface UpdateUiState { Hidden; OptionalCard(manifest); Gate(manifest); Downloading(manifest, done: Long?, total: Long?, forced: Boolean); Failed(manifest, reason: DownloadFailure, forced: Boolean) }`；`enum class DownloadFailure { Network, ChecksumMismatch, Io, NoSpace }`；`sealed interface DownloadEvent { Progress(done: Long, total: Long?); Success(path: String); Failure(reason: DownloadFailure) }`；`interface ApkInstaller { fun download(manifest: UpdateManifest): Flow<DownloadEvent> }`；`class UpdateViewModel(appVersion: AppVersion, checker: UpdateChecker, installer: ApkInstaller, gateway: AppUpdateGateway, scope: CoroutineScope, logWarning: (String) -> Unit = ::logUpdateWarning) { val state: StateFlow<UpdateUiState>; val lastVerdict: StateFlow<UpdateVerdict?>; fun checkOnce(); fun forceCheck(); fun dismissOptional(); fun startDownload(); fun retry(); fun apkUrl(): String? }`；`object UnsupportedInstaller : ApkInstaller`；`fun newUpdateViewModel(...): UpdateViewModel`
 
 - [ ] **Step 1: 定义下载接缝与进度类型（shared 侧，app 侧实现）**
 
@@ -1073,9 +1090,9 @@ enum class DownloadFailure {
     NoSpace
 }
 
-sealed interface DownloadOutcome {
-    data class Success(val path: String) : DownloadOutcome
-    data class Failure(val reason: DownloadFailure) : DownloadOutcome
+sealed interface DownloadEvent {
+    data class Success(val path: String) : DownloadEvent
+    data class Failure(val reason: DownloadFailure) : DownloadEvent
 }
 
 /**
@@ -1088,7 +1105,7 @@ sealed interface DownloadOutcome {
  * 就会出现"两处都能装、只有一处管权限"。
  */
 interface ApkInstaller {
-    fun download(manifest: UpdateManifest): Flow<DownloadOutcome>
+    fun download(manifest: UpdateManifest): Flow<DownloadEvent>
 }
 ```
 
@@ -1129,10 +1146,10 @@ private class FakeChecker(private val verdict: UpdateVerdict) : UpdateChecker {
 }
 
 private class FakeInstaller(
-    private val outcome: DownloadOutcome = DownloadOutcome.Success("/tmp/x.apk")
+    private val outcome: DownloadEvent = DownloadEvent.Success("/tmp/x.apk")
 ) : ApkInstaller {
     var downloads = 0
-    override fun download(manifest: UpdateManifest): Flow<DownloadOutcome> {
+    override fun download(manifest: UpdateManifest): Flow<DownloadEvent> {
         downloads++
         return flowOf(outcome)
     }
@@ -1241,7 +1258,7 @@ class UpdateViewModelTest {
     @Test fun download_failure_exposes_reason_and_keeps_gate_context() = runTest {
         val vm = checkedVm(
             this, UpdateVerdict.Forced,
-            FakeInstaller(DownloadOutcome.Failure(DownloadFailure.ChecksumMismatch))
+            FakeInstaller(DownloadEvent.Failure(DownloadFailure.ChecksumMismatch))
         )
         vm.startDownload(); runCurrent()
         val s = vm.state.value
@@ -1251,7 +1268,7 @@ class UpdateViewModelTest {
     }
 
     @Test fun retry_reissues_download() = runTest {
-        val installer = FakeInstaller(DownloadOutcome.Failure(DownloadFailure.Network))
+        val installer = FakeInstaller(DownloadEvent.Failure(DownloadFailure.Network))
         val vm = checkedVm(this, UpdateVerdict.Forced, installer)
         vm.startDownload(); runCurrent()
         vm.retry(); runCurrent()
@@ -1413,8 +1430,8 @@ class UpdateViewModel(
         scope.launch {
             installer.download(manifest).collect { outcome ->
                 when (outcome) {
-                    is DownloadOutcome.Success -> onDownloaded(manifest, outcome.path)
-                    is DownloadOutcome.Failure ->
+                    is DownloadEvent.Success -> onDownloaded(manifest, outcome.path)
+                    is DownloadEvent.Failure ->
                         _state.value = UpdateUiState.Failed(manifest, outcome.reason, forcedThisLaunch)
                 }
             }
@@ -1892,8 +1909,8 @@ import kotlinx.coroutines.flow.flowOf
  * 而不是可空参数：可空会让"忘了传"变成运行时 NPE，这个则直接说出原因。
  */
 object UnsupportedInstaller : ApkInstaller {
-    override fun download(manifest: UpdateManifest): Flow<DownloadOutcome> =
-        flowOf(DownloadOutcome.Failure(DownloadFailure.Io))
+    override fun download(manifest: UpdateManifest): Flow<DownloadEvent> =
+        flowOf(DownloadEvent.Failure(DownloadFailure.Io))
 }
 
 fun newUpdateViewModel(
@@ -1958,7 +1975,7 @@ git commit -m "feat(update): 门禁层挂在 RootScreen 之上，文案与进度
 - Test: `shared/src/androidUnitTest/kotlin/com/jianyi/outfit/data/update/ApkDownloaderTest.kt`
 
 **Interfaces:**
-- Consumes: `UpdateManifest`、`ApkInstaller` / `DownloadOutcome` / `DownloadFailure`（Task 5）、`httpClientEngine()`（Task 3 的 `data/remote/WeatherApiClient.kt`）
+- Consumes: `UpdateManifest`、`ApkInstaller` / `DownloadEvent` / `DownloadFailure`（Task 5）、`httpClientEngine()`（Task 3 的 `data/remote/WeatherApiClient.kt`）
 
 > **修订（Task 3 修复轮）**：引擎工厂的真名是 **`httpClientEngine()`**（`internal expect fun`）。
 > 计划里一度写作 `newHttpClientEngine()`，那是我为一个**不存在的限制**加的包装 ——
@@ -2060,7 +2077,7 @@ import android.content.Context
 import com.jianyi.outfit.data.remote.httpClientEngine
 import com.jianyi.outfit.ui.update.ApkInstaller
 import com.jianyi.outfit.ui.update.DownloadFailure
-import com.jianyi.outfit.ui.update.DownloadOutcome
+import com.jianyi.outfit.ui.update.DownloadEvent
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.get
@@ -2093,23 +2110,23 @@ class ApkDownloader(private val context: Context) : ApkInstaller {
         followRedirects = true
     }
 
-    override fun download(manifest: UpdateManifest): Flow<DownloadOutcome> = flow {
+    override fun download(manifest: UpdateManifest): Flow<DownloadEvent> = flow {
         val dir = File(context.cacheDir, "update").apply { mkdirs() }
         val target = File(dir, apkFileNameFor(manifest.versionName))
         target.delete()
 
         if (shouldRefuseDownload(manifest.sizeBytes, dir.usableSpace)) {
-            emit(DownloadOutcome.Failure(DownloadFailure.NoSpace)); return@flow
+            emit(DownloadEvent.Failure(DownloadFailure.NoSpace)); return@flow
         }
 
         // 每次重新走三跳：Gitee 的签名直链 15 分钟过期（401），不能缓存
         val response = try {
             client.get(manifest.apkUrl)
         } catch (e: Exception) {
-            emit(DownloadOutcome.Failure(DownloadFailure.Network)); return@flow
+            emit(DownloadEvent.Failure(DownloadFailure.Network)); return@flow
         }
         if (!response.status.isSuccess()) {
-            emit(DownloadOutcome.Failure(DownloadFailure.Network)); return@flow
+            emit(DownloadEvent.Failure(DownloadFailure.Network)); return@flow
         }
 
         val digest = MessageDigest.getInstance("SHA-256")
@@ -2117,22 +2134,34 @@ class ApkDownloader(private val context: Context) : ApkInstaller {
             FileOutputStream(target).use { out ->
                 val channel = response.bodyAsChannel()
                 val buf = ByteArray(64 * 1024)
+                var done = 0L
+                var sinceReport = 0L
                 while (true) {
                     val read = channel.readAvailable(buf)
                     if (read <= 0) break
                     digest.update(buf, 0, read)
                     out.write(buf, 0, read)
+                    // **进度必须真的发出去**。接缝只有 Success/Failure 两个终态的那版，
+                    // 下游 `Downloading.done` 永远是 null ⇒ 24MB 的下载全程一根 0% 死条，
+                    // 而算 progressOf/sizeText 的用例、跳终态的用例全都绿 —— 没有任何一层能单独发现。
+                    // 每 512KB 一条：够顺眼，又不至于每个 64KB 块都去重组一次 UI。
+                    done += read
+                    sinceReport += read
+                    if (sinceReport >= 512 * 1024) {
+                        sinceReport = 0L
+                        emit(DownloadEvent.Progress(done, manifest.sizeBytes))
+                    }
                 }
                 target.length()
             }
         } catch (e: Exception) {
             target.delete()
-            emit(DownloadOutcome.Failure(DownloadFailure.Io)); return@flow
+            emit(DownloadEvent.Failure(DownloadFailure.Io)); return@flow
         }
 
         if (written <= 0L) {
             target.delete()
-            emit(DownloadOutcome.Failure(DownloadFailure.Network)); return@flow
+            emit(DownloadEvent.Failure(DownloadFailure.Network)); return@flow
         }
 
         val expected = manifest.sha256
@@ -2141,10 +2170,10 @@ class ApkDownloader(private val context: Context) : ApkInstaller {
             if (!actual.equals(expected, ignoreCase = true)) {
                 // 删掉坏包：留着它，将来"复用已下载文件"的优化会直接装上坏包
                 target.delete()
-                emit(DownloadOutcome.Failure(DownloadFailure.ChecksumMismatch)); return@flow
+                emit(DownloadEvent.Failure(DownloadFailure.ChecksumMismatch)); return@flow
             }
         }
-        emit(DownloadOutcome.Success(target.absolutePath))
+        emit(DownloadEvent.Success(target.absolutePath))
     }
 }
 

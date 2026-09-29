@@ -4,6 +4,7 @@ import com.jianyi.outfit.data.AppUpdateGateway
 import com.jianyi.outfit.data.AppVersion
 import com.jianyi.outfit.data.InstallResult
 import com.jianyi.outfit.data.update.UpdateChecker
+import com.jianyi.outfit.data.update.logUpdateWarning
 import com.jianyi.outfit.data.update.UpdateDecision
 import com.jianyi.outfit.data.update.UpdateManifest
 import com.jianyi.outfit.data.update.UpdateVerdict
@@ -34,10 +35,22 @@ enum class DownloadFailure {
     NoSpace
 }
 
-/** 一次落盘下载的结果。Success 带本地 apk 的路径，直接喂给平台侧的 install */
-sealed interface DownloadOutcome {
-    data class Success(val path: String) : DownloadOutcome
-    data class Failure(val reason: DownloadFailure) : DownloadOutcome
+/**
+ * 一次落盘下载的事件流：进度、成功（带本地 apk 路径）、失败。
+ *
+ * **`Progress` 不是可选装饰，是这一层存在的理由。**
+ * 上一版这里只有 `Success | Failure` 两个终态，而 VM 之后再也没有任何东西给
+ * `Downloading.done` 赋非 null 值 —— 于是 Task 6 那根进度条在 24MB 的下载里
+ * 从 0% 一路死到装完，而 `UpdateCopyTest`（测 `progressOf`/`sizeText` 的算术）照样全绿：
+ * 每条线各自"没错"，拼起来是个不会动的控件。这种缺陷没有任何一层能单独发现，
+ * 所以把它写进接口：**生产者必须发 Progress，消费者必须显示 Progress**。
+ *
+ * `total` 可空：清单没声明 `sizeBytes` 时没人知道总量，UI 走不确定态而不是画一根假 0%。
+ */
+sealed interface DownloadEvent {
+    data class Progress(val done: Long, val total: Long?) : DownloadEvent
+    data class Success(val path: String) : DownloadEvent
+    data class Failure(val reason: DownloadFailure) : DownloadEvent
 }
 
 /**
@@ -51,7 +64,8 @@ sealed interface DownloadOutcome {
  * 就会出现"两处都能装、只有一处管权限"。
  */
 interface ApkInstaller {
-    fun download(manifest: UpdateManifest): Flow<DownloadOutcome>
+    /** 实现方必须在下载过程中发至少一条 [DownloadEvent.Progress]（每 1–2 次 flush 一条即可） */
+    fun download(manifest: UpdateManifest): Flow<DownloadEvent>
 }
 
 /**
@@ -104,7 +118,8 @@ class UpdateViewModel(
     private val checker: UpdateChecker,
     private val installer: ApkInstaller,
     private val gateway: AppUpdateGateway,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val logWarning: (String) -> Unit = ::logUpdateWarning
 ) {
     private val _state = MutableStateFlow<UpdateUiState>(UpdateUiState.Hidden)
     val state: StateFlow<UpdateUiState> = _state.asStateFlow()
@@ -156,7 +171,17 @@ class UpdateViewModel(
 
     private fun runCheck() {
         scope.launch {
-            val decision = checker.check(appVersion.versionCode)
+            // fail-open：这条路径在冷启动上。判定层自己已经把"读不到/看不懂"收敛成
+            // Unreachable 了，但 UpdateChecker 是个接口 —— 将来任何一个实现抛出未捕获异常，
+            // 容器那层的 SupervisorJob 不吞它，表现就是**开屏崩 App**。
+            // 崩一次和"这次不提示更新"之间不需要犹豫，所以这里兜住并留痕（留痕是为了
+            // 不让它退化成第二种静默失效：有日志，但不拦人）。
+            val decision = try {
+                checker.check(appVersion.versionCode)
+            } catch (e: Exception) {
+                logWarning("更新检查抛出异常，本次按“拿不到清单”处理（不拦人）：${e.message ?: e::class.simpleName}")
+                UpdateDecision(UpdateVerdict.Unreachable, null)
+            }
             lastManifest = decision.manifest
             _lastVerdict.value = decision.verdict
             if (!gateway.supported) return@launch
@@ -203,11 +228,20 @@ class UpdateViewModel(
             forced = forcedThisLaunch
         )
         downloadJob = scope.launch {
-            installer.download(manifest).collect { outcome ->
-                when (outcome) {
-                    is DownloadOutcome.Success -> onDownloaded(manifest, outcome.path)
-                    is DownloadOutcome.Failure ->
-                        _state.value = UpdateUiState.Failed(manifest, outcome.reason, forcedThisLaunch)
+            installer.download(manifest).collect { event ->
+                when (event) {
+                    // 进度是这条链唯一会让这根条动起来的来源，别在这里加"只在没有终态时才更新"
+                    // 之类的聪明判断 —— 那正好会把它变回一根死条。
+                    is DownloadEvent.Progress -> _state.value = UpdateUiState.Downloading(
+                        manifest = manifest,
+                        done = event.done,
+                        total = event.total ?: manifest.sizeBytes,
+                        forced = forcedThisLaunch
+                    )
+
+                    is DownloadEvent.Success -> onDownloaded(manifest, event.path)
+                    is DownloadEvent.Failure ->
+                        _state.value = UpdateUiState.Failed(manifest, event.reason, forcedThisLaunch)
                 }
             }
         }
