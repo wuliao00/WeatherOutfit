@@ -1966,6 +1966,13 @@ git commit -m "feat(update): 门禁层挂在 RootScreen 之上，文案与进度
 > 所以 `data.update` 本来就能直接调 `data.remote` 的 internal 声明。别名已删，别再引用它。
 - Produces: `class ApkDownloader(context: Context) : ApkInstaller`；`internal fun sha256Of(file: File): String?`；`internal fun shouldRefuseDownload(total: Long?, free: Long): Boolean`；`fun apkFileNameFor(versionName: String): String`
 
+> **实测事实（2026-09-29，第三方 Gitee Release 附件）**：附件地址带 `Range: bytes=0-99` 时
+> `foruda.gitee.com` **忽略 Range**，直接开始整文件传输（实测 30 秒推了 26MB / 58MB 才掐断）
+> ⇒ **APK 下载没有续传**。因此：不许写"断点续传/从中间偏移继续"的路径，失败就整个重来；
+> 进度回调要允许"到 90% 失败后从 0 再来"这种观感（文案不许出现"已恢复上次进度"）；
+> `shouldRefuseDownload` 那种"空间不够就别开始"的前置检查因此更重要 —— 下到一半才失败等于白烧用户流量。
+> 好消息是同一批实测确认了 HEAD 对附件地址返 **200**（跟完三跳），`headOk` 的机制成立。
+
 > **为什么放 `shared/androidMain` 而不是 app 模块**：shared 里 Ktor 是 `implementation()`（见 `shared/build.gradle.kts`），app 的编译类路径上根本没有 `io.ktor.*` —— 放 app 就得给 app 补两条 ktor 依赖，而下载器要用的引擎工厂 `httpClientEngine()` 本来就是 shared 模块内的 internal 声明。androidMain 里两者都现成，且 `:shared:testDebugUnitTest` 会自动跑 `androidUnitTest`。
 
 - [ ] **Step 1: 写失败的测试（只测纯部分：哈希、空间判定、文件名）**
@@ -2653,31 +2660,30 @@ jobs:
 4. **手动兜底全流程**：Gitee 网页 → 发行版 → 新建 → tag 填 `v2.2.0` → 上传 `app-release.apk` → 把 CI 日志里的 sha256 补进 `update.json` 并提交；
 5. 什么时候该抬 `minSupportedVersionCode`（缓存格式变更、接口凭证语义变更等会让旧版读到错数据的改动），以及抬错会拦掉所有人这件事。
 
-- [ ] **Step 3: 首个真 Release 出来后，实测探包正例（这一步不做完，功能等于没上线）**
+- [ ] **Step 3: 我们自己的第一个 Release 出来后顺手复核探包正例**
 
-`headOk` 判的是"HEAD 跟完重定向落在 2xx"。今天实测过的是**负例**与 raw 域正例：
+**这条已经从阻塞项降级为"顺手复核"** —— 2026-09-29 用**第三方真实存在附件的 Gitee Release**
+提前把机制问清了，不必等我们自己出包：
 
 ```
-curl -I https://gitee.com/wuliao11541/WeatherOutfit/releases/download/v2.1.2/jianyi-2.1.2.apk  → 404
-curl -I https://gitee.com/wuliao11541/WeatherOutfit/raw/main/README.md → 200（跟到 raw.giteeusercontent.com）
-curl -r 0-99 同一 raw 地址 → 206（支持 Range）
+curl -I https://gitee.com/beijing-jicang/yichenbao/releases/download/v1.0.34/24-12-22.apk
+  → HTTP=200
+    FINAL=https://foruda.gitee.com/attach_file/1734866382367626772/24-12-22.apk?token=…&ts=…&attname=24-12-22.apk
 ```
 
-**没有实测过的是"存在附件的 Release 下载 URL 对 HEAD 答不答 2xx"** —— 那条地址是
-三跳（`releases/download/<tag>/<file>` → `attach_files/<id>/download/<file>` → `foruda.gitee.com/…?token=&ts=`），
-而 foruda 已知**忽略 Range**、签名约 15 分钟过期后返 401。如果它对 HEAD 返 403/405，
-那么 `headOk` 恒 false ⇒ `Forced` 永远不会出现，门禁静默失效（方向是安全的，但功能是死的）。
+⇒ **`headOk` 的三跳（`releases/download/<tag>/<file>` → `attach_files/…` → `foruda`）对 HEAD 答 200**，
+`Forced` 不会因为我们把探针设计错而永远不触发。当时最怕的形态（"附件地址对 HEAD 返 403/405 ⇒
+门禁静默失效、22 条用例全绿"）已被排除。
 
-Run（把 tag 换成本次真发布的）：
-```
-curl -sSI -o /dev/null -w 'HTTP=%{http_code} FINAL=%{url_effective}\n' -L \
-  "https://gitee.com/wuliao11541/WeatherOutfit/releases/download/v2.2.0/jianyi-2.2.0.apk"
-```
-Expected: `HTTP=200`。
-- 若是 403/405：把 `UpdateHttp.headOk` 换成"带 `Range: bytes=0-0` 的 GET，接受 200/206"，
-  并同步改 `KtorUpdateHttp` 与那条 `probe_url_is_the_manifest_apk_url` 用例；
-- 若是 404：说明附件路径形状不是这个，按 `attach_files` 那跳的真实地址改 `apkUrl` 的构造。
-  **两种都必须在同一轮里改完再进 Task 11**，否则强更形同不存在。
+同时**实测到另一条会影响 Task 7 的事实**：同一个地址带 `Range: bytes=0-99` 时 foruda **忽略 Range**，
+直接开始整文件传输（30 秒内推了 26MB / 58MB 才被我主动掐断）⇒ **APK 下载没有续传**。
+`ApkDownloader` 因此不许实现"断点续传"路径，失败就整个重来；
+进度条要能接受"下到 90% 失败又从 0 开始"这种观感。
+（注意证据边界：这是**别的仓库**的附件。我们自己的包上线后仍建议顺手
+`curl -I` 一次自己的 `apkUrl` 确认 200 —— 那是确认"附件真的传上去了 + tag 拼对了"，不是确认机制。）
+
+已实测过的其它相关事实：不存在的 tag → 404（干净的负例，不是登录页）；
+raw 域 → HEAD 200 且 `Range: bytes=0-99` → 206（清单本身可分段读）。
 
 - [ ] **Step 4: 语法校验**
 

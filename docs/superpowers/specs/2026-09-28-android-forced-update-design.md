@@ -43,7 +43,13 @@
 1. **Gitee v5 API 匿名读也是 403**。对照组用超大公共仓库 `opencv/opencv` 同样 403 ⇒ 不是权限配置问题。App 端不能走 API。
 2. **`https://gitee.com/<ns>/<repo>/raw/<ref>/<path>` 免鉴权可用**：302 → `raw.giteeusercontent.com/…?metadata=<base64>&signature=…` → 200，实测 README.md 29,459 字节完整。**raw 域支持 Range（实测 206 + `Content-Range`）**。
 3. **Gitee Release 附件免鉴权可下载，`.apk` 不被特殊拦截**：实测真实仓库的 79,027,726 字节 APK，三跳 `releases/download/<tag>/<file>` → 302 → `attach_files/<id>/download/<file>` → 302 → `foruda.gitee.com/attach_file/<oid>/<小写名>?token=&ts=&attname=` → 200，`Content-Type: application/zip`，头 8 字节 `50 4b 03 04 00 00 00 00`（`PK\x03\x04`）。无 cookie、无 Referer，六种 UA（含 `okhttp/4.12.0`、`Dalvik/2.1.0 (…Android 14…)`）全部 200。
-4. **附件域名 `foruda.gitee.com` 忽略 Range**：请求 `bytes=0-1023` 返回 200 + 全量，无 `Accept-Ranges`、无 `Content-Range` ⇒ **断点续传不可用**。
+4. **附件域名 `foruda.gitee.com` 忽略 Range**：请求 `bytes=0-1023` 返回 200 + 全量，无 `Accept-Ranges`、无 `Content-Range` ⇒ **断点续传不可用**。2026-09-29 再测复现（`bytes=0-99` 直接开始整文件传输，30 秒推了 26MB / 58MB 才掐断）。
+4b. **附件地址对 `HEAD` 答 200（2026-09-29 新增）**：`curl -I` 一个第三方真实存在附件的地址
+   `gitee.com/beijing-jicang/yichenbao/releases/download/v1.0.34/24-12-22.apk`
+   → 跟完三跳后 `HTTP=200`，FINAL 落在 `foruda.gitee.com/attach_file/<id>/<file>?token=&ts=&attname=`。
+   这条是 `headOk` 探针的前提：它若不成立（403/405），"包下不到就不拦人"那条降级就会**永远**成立，
+   门禁静默失效而所有测试全绿。机制现已证明，我们自己第一个 release 出来后只需顺手复核一次
+   （确认附件真传上去了、tag 与 versionName 拼对了），不再是"机制未知"。
 5. **签名链接 15 分钟过期，失败码是 401 不是 403**（实测 +14.3min 仍 200，+15.3min 起 401，body `{"error":"unauthorized"…}`）。⇒ 不能缓存第三跳 URL，每次下载都要从 `releases/download/…` 重新走。
 6. **`/releases/latest` 的响应形态由 UA 决定**：`okhttp/4.12.0` 给 JSON，`Dalvik/2.1.0 (…)` 给 HTML，`curl` UA 直接给源码 zip。App 默认 UA 正是 Dalvik。⇒ **不用它当清单**，避免依赖 UA 协商。
 7. **配额**：单附件 100MB（GVP 200MB）、单仓库附件总量 1GB、Git 单文件 50MB、仓库 500MB。当前 debug APK 23,999,408 字节，release 未签名 4,630,357 字节 ⇒ 走附件余量充足。
