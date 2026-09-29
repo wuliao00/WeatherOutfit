@@ -142,6 +142,23 @@ class UpdateViewModel(
     private val _lastVerdict = MutableStateFlow<UpdateVerdict?>(null)
     val lastVerdict: StateFlow<UpdateVerdict?> = _lastVerdict.asStateFlow()
 
+    /**
+     * 有没有一次检查**正在跑**。设置页那行副标题读它（Task 9）。
+     *
+     * 为什么需要第三个 flow：`lastVerdict` 只在结论落地时变，而一次检查要等网络
+     * （连接超时上限 8 秒）—— 这中间屏幕上什么都没有。设置页的反馈按裁决**只走副标题、
+     * 不弹 Snackbar**，所以"点下去了"这件事必须由这一维来表示，否则那次点击看起来就是没生效。
+     *
+     * 为什么必须由 VM 提供、而不是 UI 自己记一个 flag：StateFlow 对**相同值去重**。
+     * 用户连点两次而两次结论一样（例如都 UpToDate）时，`lastVerdict` 根本不会再发一帧，
+     * UI 那个 flag 就没有可靠的复位信号，会永远停在"正在检查…"。
+     *
+     * 置位点刻意在 `scope.launch` **之前**（同步）：放进 launch 里的话，点击与第一帧之间
+     * 会闪一下旧结论；而 `finally` 里的清零必须在 launch 内，否则它会在检查开始时就跑完。
+     */
+    private val _checking = MutableStateFlow(false)
+    val checking: StateFlow<Boolean> = _checking.asStateFlow()
+
     private var checkedThisLaunch = false
     private var optionalDismissed = false
     private var lastManifest: UpdateManifest? = null
@@ -194,38 +211,45 @@ class UpdateViewModel(
     }
 
     private fun runCheck() {
+        // 平台不支持 ⇒ 连问都不问（评审 Important「iOS 白打一次网络」）。
+        // 这一行原本在 launch 里面；把它提到这里是为了让下面的 checking 也能一起免置位 ——
+        // 留在 launch 里的话，iOS 上 `_checking` 会先被置真再被那句 return@launch 跳过清零，
+        // 设置页那行字就永远停在"正在检查…"。判断仍然只有一处，没有复制。
+        // 副作用与原来一致：iOS 上 lastVerdict 保持 null（"还没查过"），state 保持 Hidden。
+        if (!gateway.supported) return
+        _checking.value = true
         scope.launch {
-            // 平台不支持 ⇒ 连问都不问（评审 Important「iOS 白打一次网络」）。
-            // 这一行原来在 checker.check 之后，于是 iPhone 每次冷启动都真发一次 GET
-            // （外加可能的 HEAD）去打 Gitee，而这一端**永远**不显示任何更新入口。
-            // 副作用：iOS 上 lastVerdict 保持 null（"还没查过"）—— 这是更诚实的取值，
-            // 而它唯一的读者（Task 9 设置页那一行）本来就该被 supported 挡在门外。
-            if (!gateway.supported) return@launch
-            // fail-open：这条路径在冷启动上。判定层自己已经把"读不到/看不懂"收敛成
-            // Unreachable 了，但 UpdateChecker 是个接口 —— 将来任何一个实现抛出未捕获异常，
-            // 容器那层的 SupervisorJob 不吞它，表现就是**开屏崩 App**。
-            // 崩一次和"这次不提示更新"之间不需要犹豫，所以这里兜住并留痕（留痕是为了
-            // 不让它退化成第二种静默失效：有日志，但不拦人）。
-            val decision = try {
-                checker.check(appVersion.versionCode)
-            } catch (e: Exception) {
-                logWarning("更新检查抛出异常，本次按“拿不到清单”处理（不拦人）：${e.message ?: e::class.simpleName}")
-                UpdateDecision(UpdateVerdict.Unreachable, null)
-            }
-            lastManifest = decision.manifest
-            _lastVerdict.value = decision.verdict
-            val next = newStateFor(decision)
-            // 门禁"只进不出"：这次冷启动挂过门禁之后，一次失败的检查不许把它解除（Hidden）。
-            // 症状原本是"门禁挂着时点一下设置页「检查更新」，恰好断网 ⇒ 门禁消失"，
-            // 等于用户随手一点就绕过了这个功能存在的全部意义。
-            _state.value = if (forcedThisLaunch && next is UpdateUiState.Hidden) {
-                forcedManifest?.let { UpdateUiState.Gate(it) } ?: next
-            } else {
-                next
-            }
-            (_state.value as? UpdateUiState.Gate)?.let {
-                forcedThisLaunch = true
-                forcedManifest = it.manifest
+            // 清零放在 finally：检查以哪一种方式结束（拿到结论、按 Unreachable 收敛、
+            // 甚至整个 coroutine 被取消）都不许把设置页那行留在"正在检查…"上。
+            try {
+                // fail-open：这条路径在冷启动上。判定层自己已经把"读不到/看不懂"收敛成
+                // Unreachable 了，但 UpdateChecker 是个接口 —— 将来任何一个实现抛出未捕获异常，
+                // 容器那层的 SupervisorJob 不吞它，表现就是**开屏崩 App**。
+                // 崩一次和"这次不提示更新"之间不需要犹豫，所以这里兜住并留痕（留痕是为了
+                // 不让它退化成第二种静默失效：有日志，但不拦人）。
+                val decision = try {
+                    checker.check(appVersion.versionCode)
+                } catch (e: Exception) {
+                    logWarning("更新检查抛出异常，本次按“拿不到清单”处理（不拦人）：${e.message ?: e::class.simpleName}")
+                    UpdateDecision(UpdateVerdict.Unreachable, null)
+                }
+                lastManifest = decision.manifest
+                _lastVerdict.value = decision.verdict
+                val next = newStateFor(decision)
+                // 门禁"只进不出"：这次冷启动挂过门禁之后，一次失败的检查不许把它解除（Hidden）。
+                // 症状原本是"门禁挂着时点一下设置页「检查更新」，恰好断网 ⇒ 门禁消失"，
+                // 等于用户随手一点就绕过了这个功能存在的全部意义。
+                _state.value = if (forcedThisLaunch && next is UpdateUiState.Hidden) {
+                    forcedManifest?.let { UpdateUiState.Gate(it) } ?: next
+                } else {
+                    next
+                }
+                (_state.value as? UpdateUiState.Gate)?.let {
+                    forcedThisLaunch = true
+                    forcedManifest = it.manifest
+                }
+            } finally {
+                _checking.value = false
             }
         }
     }

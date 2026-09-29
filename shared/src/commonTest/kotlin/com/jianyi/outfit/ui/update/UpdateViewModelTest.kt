@@ -108,6 +108,24 @@ private class ProgressInstaller(
 }
 
 /**
+ * 挂在半空的检查器：唯一用途是观察**「正在跑」这一帧**。
+ *
+ * `FakeChecker` 的 check 立刻返回，`checking` 那维在测试里根本来不及被看见，
+ * 于是"设置页那行字有没有在结果回来之前动起来"这件事就没被测过。
+ * 用完必须 complete 掉 —— 否则那个 await 挂着，runTest 收尾时报未完成协程
+ * （与 PendingInstaller 同一条规矩）。
+ */
+private class HangingChecker : UpdateChecker {
+    val decision = CompletableDeferred<UpdateDecision>()
+    var calls = 0
+
+    override suspend fun check(currentVersionCode: Int): UpdateDecision {
+        calls++
+        return decision.await()
+    }
+}
+
+/**
  * 按脚本给结论的检查器：一条用例里要模拟"冷启动查到门禁，之后手动检查恰好断网"。
  * 脚本用完之后一律按 Unreachable 处理（等价于"再查也拿不到清单"）。
  */
@@ -174,6 +192,68 @@ class UpdateViewModelTest {
     }
 
     /**
+     * 「正在检查」这一维只有设置页那行副标题用，而它是那次点击**唯一的即时反馈**
+     * （那条入口按裁决不弹 Snackbar）。两端都必须钉住：
+     * - 不置真：用户点了、网络正在跑，屏幕上那句"当前版本 2.2.0（还没查过）"一动不动，
+     *   表现就是"这个按钮坏了"，于是连点、于是怀疑整个功能没做。
+     * - 不落回 false：那句"正在检查…"会一直挂着，比没反馈更糟 —— 用户永远等一个已经结束的请求。
+     * 断网、超时、异常、取消四种结束方式都走 finally，所以这里挑"正常完成"与"抛异常"
+     * （后者见 a_throwing_checker_fails_open_instead_of_crashing）两条分别钉。
+     */
+    @Test fun checking_is_true_while_a_check_is_in_flight_and_false_afterwards() = runTest {
+        val checker = HangingChecker()
+        val vm = UpdateViewModel(
+            appVersion = AppVersion(8, "2.1.2"),
+            checker = checker,
+            installer = FakeInstaller(),
+            gateway = FakeGateway(),
+            scope = this
+        )
+        assertFalse(vm.checking.value, "还没点就不许显示正在检查")
+
+        vm.checkOnce()
+        // 先只看"置位是同步的"这一半：测试调度器还没轮到那次 launch，
+        // 这里断言的是"点击与第一帧之间没有空窗"
+        assertTrue(vm.checking.value, "点下去到结果回来之间必须有反馈，否则那次点击看起来没生效")
+
+        // 让那次检查真的跑起来 —— 现在它挂在 await 上，这就是"请求在飞"的那一帧
+        advanceUntilIdle()
+        assertEquals(1, checker.calls, "检查请求本身必须真的发出去了，flag 不是装饰")
+        assertTrue(vm.checking.value, "请求还挂着的时候不许提前落回 false")
+
+        checker.decision.complete(UpdateDecision(UpdateVerdict.UpToDate, MANIFEST))
+        advanceUntilIdle()
+        assertFalse(vm.checking.value, "检查已经落地，副标题不许还停在正在检查")
+    }
+
+    /**
+     * forceCheck 复用同一条路，所以它也必须重新置真 —— 用户在同一个冷启动里点第二次时，
+     * 没有这一维的话第二次点击同样毫无反应（而第二次恰恰是最常见的那次：第一次没看到变化）。
+     */
+    @Test fun force_check_marks_checking_again() = runTest {
+        val checker = HangingChecker()
+        val vm = UpdateViewModel(
+            appVersion = AppVersion(8, "2.1.2"),
+            checker = checker,
+            installer = FakeInstaller(),
+            gateway = FakeGateway(),
+            scope = this
+        )
+        vm.checkOnce()
+        checker.decision.complete(UpdateDecision(UpdateVerdict.UpToDate, MANIFEST))
+        advanceUntilIdle()
+        assertFalse(vm.checking.value)
+
+        vm.forceCheck()
+        assertTrue(vm.checking.value, "手动再查一次同样要有即时反馈")
+        checker.decision.complete(UpdateDecision(UpdateVerdict.UpToDate, MANIFEST))
+        // 同一个 deferred 早就完成了，第二次的 await 立刻返回；
+        // 这里要钉的是"flag 能再置真、并且这次结束仍然落回 false"
+        advanceUntilIdle()
+        assertFalse(vm.checking.value)
+    }
+
+    /**
      * 拉不到清单 ⇒ 什么都不显示，而且**连下载都不许发起**。
      * apkUrl() 这时候必须是 null：Task 6 的"复制下载链接"逃生口没地址就该整行不出现，
      * 而不是复制出一个空串让用户去浏览器里撞 404。
@@ -235,6 +315,11 @@ class UpdateViewModelTest {
         assertEquals(0, checker.calls, "iOS 上没有入口，这次清单请求是白打的网络流量")
         assertIs<UpdateUiState.Hidden>(vm.state.value)
         assertNull(vm.lastVerdict.value, "没查过就不许报结论")
+        assertFalse(
+            vm.checking.value,
+            "supported 判断一旦留在 launch 里面，这里会是 true 并且**永远不回 false** —— " +
+                "设置页那行字会一直停在「正在检查」，而那一端根本没发过任何请求"
+        )
         vm.startDownload()
         assertEquals(0, installer.downloads, "不支持的平台上连下载都不该有能力开始")
     }
@@ -577,6 +662,9 @@ class UpdateViewModelTest {
         advanceUntilIdle()
         assertIs<UpdateUiState.Hidden>(vm.state.value)
         assertEquals(UpdateVerdict.Unreachable, vm.lastVerdict.value)
+        // 抛出也算"这次检查结束了"：finally 必须把 flag 落回 false，
+        // 否则设置页那句副标题会永远停在「正在检查」，而那次请求早就死了。
+        assertFalse(vm.checking.value, "异常结束同样是结束，不许把副标题留在正在检查")
         assertEquals(1, logs.size)
         assertTrue(logs.single().contains("fake checker blew up"), "日志要带上原因，否则等于没留痕：$logs")
     }

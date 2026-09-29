@@ -76,6 +76,7 @@ import com.jianyi.outfit.ui.scenery.LocalSceneryController
 import com.jianyi.outfit.ui.scenery.SceneryGrid
 import com.jianyi.outfit.ui.scenery.SceneryStrip
 import com.jianyi.outfit.ui.theme.LocalScenery
+import com.jianyi.outfit.ui.update.UpdateSettingsCopy
 import kotlin.math.roundToInt
 
 /** 可选的每日推送时刻（点整），与推送时间选择器一一对应 */
@@ -308,6 +309,27 @@ fun SettingsScreen(
 
             // ===== 关于 =====
             Section("关于") {
+                // 「检查更新」：iOS 上 gateway.supported 恒 false ⇒ **整行不渲染**，
+                // 不是渲染出来再禁用 —— 那一端没有任何可更新的通道（App Store 规则），
+                // 摆一颗按不动的按钮只会让人以为功能坏了。
+                // 反馈全部走这一行的副标题，不额外弹 Snackbar：更新状态机往设置页 VM 的
+                // message 通道回写是一条跨 VM 耦合，而副标题本来就要分六档状态。
+                if (deps.updateGateway.supported) {
+                    val updateVm = deps.updateViewModel
+                    val lastVerdict by updateVm.lastVerdict.collectAsState()
+                    val checking by updateVm.checking.collectAsState()
+                    ActionRow(
+                        title = "检查更新",
+                        subtitle = UpdateSettingsCopy.entrySubtitle(
+                            appVersion = deps.appVersion,
+                            last = lastVerdict,
+                            checking = checking
+                        ),
+                        // 只做一件事：再查一次。这里**不许**有任何"重置/清除门禁状态"的动作，
+                        // 也不许拿 dismissOptional() 兜底 —— 那等于一次点击解除硬门禁。
+                        onClick = updateVm::forceCheck
+                    )
+                }
                 TextButtonRow("重新查看使用须知", viewModel::resetDisclaimer)
                 TextButtonRow("版本 2.0.0", null)
                 Text(
@@ -656,4 +678,44 @@ private fun TextButtonRow(text: String, onClick: (() -> Unit)?) {
             .clickable(enabled = onClick != null) { onClick?.invoke() }
             .padding(vertical = 8.dp)
     )
+}
+
+/**
+ * 带副标题的可点击行。
+ *
+ * 为什么不复用 [TextButtonRow]：它只有一个文本槽，而「检查更新」这一行要同时说
+ * "这是什么动作"和"查到现在是什么结论"，把两者拼成一句会丢掉副标题那一档的颜色层次。
+ * 为什么也不复用 [SwitchRow]：它右边是 Switch，语义是"开关"，而这里是"点一下做一件事"
+ * —— 用它会让人以为可以在这里关掉更新检查。形状照 SwitchRow 的左列（标题 + 副标题）来，
+ * 右边换成什么都没有。
+ *
+ * ## 两行文本都不许加 maxLines
+ * 这行是本项目踩过的那类缺陷的直接候选：首页降级条的 CTA 加了 `maxLines = 1`，
+ * 结果长文案被裁成省略号，而无障碍树里文本是**完整的** —— 只有裁图才看得出来。
+ * 这里的副标题最长一档是"当前版本 X（无法确认是否有更新）"，窄屏 + 长版本名时它会换行，
+ * 换行是可接受的下场，把"检查失败"裁成"当前版…"是不可接受的。
+ *
+ * 圆角用 14dp 而不是 [TextButtonRow] 的 CircleShape：那个形状在单行文本上只是个胶囊，
+ * 套在两行高的块上会把左下角和右上角切进文字里（没有背景色时平时看不出来，一按就看见）。
+ */
+@Composable
+private fun ActionRow(title: String, subtitle: String, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp)
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Text(
+            text = subtitle,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
 }
