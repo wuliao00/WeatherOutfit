@@ -1,0 +1,371 @@
+name: Release
+
+# 只有 tag 能触发发布。理由：清单里的 apkUrl 指向 releases/download/<tag>/<file>，
+# 而"包下不到就不拦人"那条护栏全靠 HEAD 探这个地址 —— tag 就是"这个包真的存在"的唯一凭据。
+# 用 push 触发的话，任何一次提交都会去动线上清单指向的那个附件位，窗口期没人兜得住。
+on:
+  push:
+    # 与 tag 命名约定一致：v<versionName>（例如 v2.2.0 ↔ update.json 的 versionName "2.2.0"
+    # 与 apkUrl 里的 /download/v2.2.0/）。形状不匹配不会静默发出去，
+    # 『核对 tag 与 update.json』那一步会红着停下。
+    tags: [ "v*" ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  # 同一 tag 的两次 run 不许互相 cancel：半途掐掉会留下"发行版建好了、附件没传上去"的半态，
+  # 而那正好是 HEAD 探包 404 的形态 —— 症状是门禁静默失效，不是报错。
+  cancel-in-progress: false
+
+env:
+  # Gitee 的命名空间与 GitHub 那个不一样（GitHub 侧是 wuliao00/WeatherOutfit），
+  # 所以这里不能图省事取 github.repository。
+  GITEE_REPO: wuliao11541/WeatherOutfit
+
+jobs:
+  publish:
+    name: Build signed APK and publish to Gitee
+    runs-on: ubuntu-latest
+
+    # secrets 全部交给 job 级 env（job 级 env 是允许引用 secrets 上下文的），
+    # 由**脚本内部**判断该走哪条分支。
+    # 刻意不写 `if: ${{ env.GITEE_API_TOKEN != '' }}` 这类步骤级条件：
+    # 步骤级 if 里 secrets 上下文不可用，而 env 的可见性又依赖"同一个 step 的 env 块"
+    # 这种容易踩空的细节 —— 造出来的症状是"看起来跑了其实没跑"的绿勾。
+    # 现在缺哪个 secret 都会留下一条能读的 ::warning:: / ::error::，注释条数 = 缺的条数。
+    env:
+      GITEE_API_TOKEN: ${{ secrets.GITEE_API_TOKEN }}
+      RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+      RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+      RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+      RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+      WEATHER_API_ID: ${{ secrets.WEATHER_API_ID }}
+      WEATHER_API_KEY: ${{ secrets.WEATHER_API_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # 先体检再构建：五个 secrets 现在一个都没配，如果只在最后一步才说"没发出去"，
+      # 这一轮 15 分钟的构建就白等了。这一步只报警不失败 —— 该失败的地方在后面。
+      - name: Pre-flight — 报缺哪些 secrets
+        run: |
+          set -uo pipefail
+          missing=""
+          for name in RELEASE_KEYSTORE_BASE64 RELEASE_KEYSTORE_PASSWORD RELEASE_KEY_ALIAS RELEASE_KEY_PASSWORD GITEE_API_TOKEN WEATHER_API_ID WEATHER_API_KEY; do
+            if [ -z "${!name:-}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::warning::未配置的 secrets：${missing}"
+            echo "::warning::缺 RELEASE_KEYSTORE_* 那四个 ⇒ 本次会在『Require release signing secrets』红着停下，不会发布。"
+            echo "::warning::只缺 GITEE_API_TOKEN ⇒ 构建照常、APK 进 Actions 产物，但不自动发布，要按 README『发布手册』手动传附件。"
+          else
+            echo "七个 secrets 全齐。"
+          fi
+
+      # local.properties 不进版本库，CI 上必须自己写出来（sdk.dir + 天气凭证），与 ci.yml 同源。
+      - name: Write local.properties
+        run: |
+          set -euo pipefail
+          {
+            echo "sdk.dir=${ANDROID_HOME}"
+            echo "WEATHER_API_ID=${WEATHER_API_ID:-88888888}"
+            echo "WEATHER_API_KEY=${WEATHER_API_KEY:-88888888}"
+          } > local.properties
+          if [ -z "${WEATHER_API_ID:-}" ] || [ -z "${WEATHER_API_KEY:-}" ]; then
+            echo "::warning::未配置 WEATHER_API_ID/KEY —— 这个要发布的包里打的是公共演示凭证 88888888（与他人共享频次，README 明写不可用于发布）"
+          fi
+
+      - name: Require release signing secrets
+        run: |
+          set -uo pipefail
+          missing=""
+          for name in RELEASE_KEYSTORE_BASE64 RELEASE_KEYSTORE_PASSWORD RELEASE_KEY_ALIAS RELEASE_KEY_PASSWORD; do
+            if [ -z "${!name:-}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::未配置签名 secrets：${missing}"
+            echo "::error::未签名的包不能当更新包发布：安卓只允许同一签名的包覆盖安装，"
+            echo "::error::传一个未签名（或另一把钥匙签的）附件上去，老用户点安装只会得到『未安装应用』。"
+            echo "::error::本次 run 故意停在红 —— 绿而没发出去，比红而没发出去更坏。"
+            echo "::error::补齐这四个 secrets 重跑，或按 README『发布手册』的手动流程发版。"
+            exit 1
+          fi
+
+      - name: Decode release keystore
+        run: echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > "${{ runner.temp }}/release.jks"
+
+      # 四个密码/别名走 job 级 env，app/build.gradle.kts 里是 System.getenv 读的。
+      # 注意那边的写法是 `if (path.isNotBlank() && file(path).exists())` —— keystore 文件不存在时
+      # 它**静默不配 signingConfig**，assembleRelease 照样绿、产出未签名包。
+      # 所以下面那步 apksigner 验签不是锦上添花，是唯一能抓住这条绿的锁。
+      - name: Assemble signed release
+        env:
+          RELEASE_KEYSTORE_PATH: ${{ runner.temp }}/release.jks
+        run: ./gradlew assembleRelease --stacktrace
+
+      - name: Check tag matches update.json
+        id: manifest
+        run: |
+          set -euo pipefail
+          python3 - "$GITHUB_REF_NAME" update.json <<'PY'
+          import json, os, sys
+
+          tag, path = sys.argv[1], sys.argv[2]
+          m = json.load(open(path, encoding="utf-8"))
+          url = m["apkUrl"]
+          errors = []
+
+          version_name = tag[1:] if tag.startswith("v") else tag
+          if m["versionName"] != version_name:
+              errors.append(f"update.json 的 versionName={m['versionName']!r} 与 tag={tag} 不一致")
+          if f"/download/{tag}/" not in url:
+              errors.append(f"update.json 的 apkUrl 不含 /download/{tag}/，HEAD 探包会永远探空：{url}")
+
+          # 这三条就是解析器 isSane() 的语义闸，踩中任何一条的症状都是"整份清单判无效
+          # ⇒ 没有人收到更新 ⇒ App 端零报错、CI 零失败"，所以必须在这里、发布之前挡住。
+          if not url.startswith("https://"):
+              errors.append(f"apkUrl 协议必须是小写 https://：{url}")
+          if "?" in url or "#" in url:
+              errors.append(f"apkUrl 不许带 query/fragment（签名地址约 15 分钟过期，清单里要写稳定的裸地址）：{url}")
+          if not url.endswith(".apk"):
+              errors.append(f"apkUrl 必须以 .apk 结尾：{url}")
+
+          name = url.rsplit("/", 1)[-1]
+          if "/" in name or name in ("", ".", ".."):
+              errors.append(f"apkUrl 末段不是一个文件名：{name!r}")
+          if name != name.lower():
+              errors.append(f"附件名请一律小写（Gitee 落盘会小写化，别靠大小写区分）：{name!r}")
+
+          if errors:
+              print("::error::清单与本次 tag 对不上，见下面逐条；这一步故意失败，不发一个没人探得到的地址")
+              for e in errors:
+                  print("  - " + e)
+              sys.exit(1)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"attach_name={name}\n")
+          print(f"清单与 tag 一致：{m['versionName']} (code {m['versionCode']})，附件名 {name}")
+          PY
+
+      - name: Stage the APK under the manifest's attachment name
+        id: stage
+        env:
+          ATTACH_NAME: ${{ steps.manifest.outputs.attach_name }}
+        run: |
+          set -euo pipefail
+          # 用 glob 数文件而不是 `ls | wc -l`：目录不存在时 ls 报错、wc 照样给 0，
+          # "构建没产出"会被读成"产出 0 个"然后撞进后面一句含糊的 test -f。
+          count=0
+          found=""
+          src=""
+          for f in app/build/outputs/apk/release/*.apk; do
+            [ -f "$f" ] || continue
+            count=$((count + 1))
+            src="$f"
+            found="$found $f"
+          done
+          if [ "$count" -ne 1 ]; then
+            echo "::error::assembleRelease 应恰好产出 1 个 .apk，实际 $count 个：$found"
+            exit 1
+          fi
+          if [ -z "${ATTACH_NAME:-}" ]; then
+            echo "::error::上一步没给出 attach_name，不知道要按什么名字传附件"
+            exit 1
+          fi
+          mkdir -p dist
+          # 附件名必须就是 apkUrl 末段：Gitee 的 attach_files 用文件原名做附件名，
+          # 传成 app-release.apk 的话清单里的 jianyi-x.y.z.apk 永远 404 ⇒ 门禁静默退化成可跳过提示。
+          cp "$src" "dist/$ATTACH_NAME"
+          echo "apk=dist/$ATTACH_NAME" >> "$GITHUB_OUTPUT"
+          echo "归档：$src → dist/$ATTACH_NAME"
+
+      - name: Verify the APK is really signed
+        env:
+          APK_PATH: ${{ steps.stage.outputs.apk }}
+        run: |
+          set -euo pipefail
+          APKSIGNER=""
+          for c in "$ANDROID_HOME"/build-tools/*/apksigner; do
+            [ -x "$c" ] && APKSIGNER="$c"
+          done
+          if [ -z "$APKSIGNER" ]; then
+            echo "::error::runner 上找不到 apksigner，无法证明这个包签过名 —— 宁可红也不发来路不明的安装包"
+            exit 1
+          fi
+          "$APKSIGNER" verify --min-sdk-version 26 "$APK_PATH"
+          echo "签名验证通过：$APK_PATH"
+
+      - name: Compute package digest
+        id: pkg
+        env:
+          APK_PATH: ${{ steps.stage.outputs.apk }}
+        run: |
+          set -euo pipefail
+          SHA256=$(sha256sum "$APK_PATH" | cut -d' ' -f1)
+          SIZE=$(stat -c %s "$APK_PATH")
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
+          # 摘要页是"记得回填"最不容易被翻过去的地方：日志里那行会被冲走，这里不会。
+          {
+            echo "## 本次包体实测值（请人工补进 update.json）"
+            echo ""
+            echo "- 文件：\`$APK_PATH\`"
+            echo "- sha256：\`$SHA256\`"
+            echo "- sizeBytes：\`$SIZE\`"
+            echo "- 下载地址（清单里该写的形状）：\`https://gitee.com/$GITEE_REPO/releases/download/$GITHUB_REF_NAME/$ATTACH_NAME\`"
+            echo ""
+            echo "清单里 \`sha256\` 是**可选**字段：不回填的话 App 端那道下载完比对哈希的闸等于不存在。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cross-check declared sha256 / sizeBytes
+        env:
+          ACTUAL_SHA: ${{ steps.pkg.outputs.sha256 }}
+          ACTUAL_SIZE: ${{ steps.pkg.outputs.size }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, re, sys
+
+          m = json.load(open("update.json", encoding="utf-8"))
+          actual_sha = os.environ["ACTUAL_SHA"].strip().lower()
+          actual_size = int(os.environ["ACTUAL_SIZE"])
+          declared_sha = m.get("sha256")
+          declared_size = m.get("sizeBytes")
+          errors = []
+
+          # 形状比"不一致"更坏：UpdateManifestParser.isSha256Hex() 只认 **小写** 十六进制，
+          # 声明成大写（或长度不对）⇒ 解析器把整份清单判无效 ⇒ "没有人收到更新"，
+          # 而 App 端零报错、CI 零失败。所以这里按解析器的口径逐字比，不做大小写宽容。
+          if declared_sha is not None and not re.fullmatch(r"[0-9a-f]{64}", str(declared_sha)):
+              errors.append(f"update.json 声明的 sha256 不是 64 位小写十六进制，整份清单会被解析器拒掉：{declared_sha!r}")
+          if declared_sha is not None and str(declared_sha).lower() != actual_sha:
+              errors.append(f"清单声明的 sha256 与实际包不一致：\n    声明 {declared_sha}\n    实际 {actual_sha}")
+          if declared_size is not None and int(declared_size) != actual_size:
+              errors.append(f"清单声明的 sizeBytes 与实际包不一致：声明 {declared_size}，实际 {actual_size}")
+
+          if errors:
+              print("::error::清单与本次产出的包对不上 ⇒ 构建失败（防止清单和包漂移）")
+              for e in errors:
+                  print("  - " + e)
+              sys.exit(1)
+
+          print(f"实际 sha256：   {actual_sha}")
+          print(f"实际 sizeBytes：{actual_size}")
+          if declared_sha is None:
+              print("清单未声明 sha256 —— 跳过比对。**请把上面两个值补进 update.json 并提交**，")
+              print("否则 App 那道『下载完校验哈希』的闸等于不存在（它是『声明了才校验』）。")
+              print("::warning::update.json 未声明 sha256，完整性校验形同不存在，请回填上面的实际值")
+          else:
+              print("清单声明的 sha256 与实际包一致。")
+          if declared_size is None:
+              print("清单未声明 sizeBytes —— 下载进度条走不确定态，建议一并回填。")
+          PY
+
+      # 两步式：先建发行版拿 id，再传附件。端点与参数取自 Gitee 官方 OpenAPI 规范
+      # （https://gitee.com/api/v5/doc_json），但**本 job 是第一次真实调用**：
+      # v5 API 不带 token 一律 403（连公开仓库都是），所以这条分支从没被真跑过。
+      # 失败就按 README「发布手册」手动上传 —— 更新功能不依赖这条链路成功。
+      - name: Publish to Gitee Release
+        env:
+          APK_PATH: ${{ steps.stage.outputs.apk }}
+          ATTACH_NAME: ${{ steps.manifest.outputs.attach_name }}
+          SHA256: ${{ steps.pkg.outputs.sha256 }}
+          SIZE: ${{ steps.pkg.outputs.size }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GITEE_API_TOKEN:-}" ]; then
+            # 这里是 exit 0，不是跳过：本次确实没发布，必须让人读到。
+            # 安静跳过 = 以为发过了其实没发，是最坏的一种绿。
+            echo "::warning::未配置 GITEE_API_TOKEN ⇒ 本次没有自动发布，线上清单指向的那个附件还没上传。"
+            echo "::warning::请手动在 Gitee 建发行版 tag=$GITHUB_REF_NAME，上传附件 $ATTACH_NAME（README『发布手册』第五节有全流程）。"
+            echo "::warning::实际 sha256=$SHA256 sizeBytes=$SIZE —— 记得补进 update.json 并推到 gitee 的 main。"
+            exit 0
+          fi
+
+          BODY=$(python3 -c "import json;print(json.load(open('update.json',encoding='utf-8')).get('notes') or '')")
+          # 带 - 的 tag（v2.2.0-rc1）当预发布，稳定版号当正式发行版。
+          case "$GITHUB_REF_NAME" in
+            *-*) PRERELEASE=true ;;
+            *)   PRERELEASE=false ;;
+          esac
+
+          # 为什么不用 `--fail-with-body`：它和 `-o` 同时用的时候，非 2xx 的响应体会被写进
+          # 文件而不是打屏，curl 直接以 22 退出 ⇒ 日志里只剩一句 "returned error: 403"，
+          # 看不见 Gitee 给的原因（token 无效 / 发行版已存在 / 字段名不对）。
+          # 这是本 workflow 第一次真调用那两个端点，失败原因必须一眼看得到，所以显式判 http_code。
+          #
+          # form-data 带 access_token，不是 Bearer header —— 这是实测与官方规范一致的形态，
+          # 别改成"看起来更 RESTful"的 Authorization 头。
+          CODE=$(curl -sS -o release.json -w '%{http_code}' -X POST \
+            "https://gitee.com/api/v5/repos/$GITEE_REPO/releases" \
+            --data-urlencode "access_token=$GITEE_API_TOKEN" \
+            --data-urlencode "tag_name=$GITHUB_REF_NAME" \
+            --data-urlencode "name=简衣 $GITHUB_REF_NAME" \
+            --data-urlencode "body=$BODY" \
+            --data-urlencode "target_commitish=$GITHUB_SHA" \
+            --data-urlencode "prerelease=$PRERELEASE")
+          # -w 的输出是唯一进 stdout 的东西，但只要有别的东西混进来（curl 版本差异、告警），
+          # 下面那句 annotation 就会被撑成多行而失效 —— 先剥成纯数字。
+          CODE="${CODE//[!0-9]/}"
+          case "$CODE" in
+            2*) echo "建发行版 HTTP=$CODE" ;;
+            *)
+              echo "::error::Gitee 建发行版失败 HTTP=$CODE（端点 /api/v5/repos/$GITEE_REPO/releases）"
+              echo "  响应体：$(tr -d '\r\n' < release.json | cut -c1-800)"
+              echo "::error::本次没有发布。按 README『发布手册』手动建发行版 + 传附件即可，功能不依赖这条链路。"
+              exit 1
+              ;;
+          esac
+
+          RELEASE_ID=$(python3 - <<'PY'
+          import json
+
+          d = json.load(open("release.json", encoding="utf-8"))
+          rid = d.get("id")
+          if rid is None:
+              raise SystemExit("Gitee 建发行版没返回 id，原始响应（截断）：" + json.dumps(d, ensure_ascii=False)[:800])
+          print(rid)
+          PY
+          )
+          echo "建好发行版 id=$RELEASE_ID"
+
+          CODE=$(curl -sS -o attach.json -w '%{http_code}' -X POST \
+            "https://gitee.com/api/v5/repos/$GITEE_REPO/releases/$RELEASE_ID/attach_files" \
+            -F "access_token=$GITEE_API_TOKEN" \
+            -F "file=@$APK_PATH")
+          CODE="${CODE//[!0-9]/}"
+          case "$CODE" in
+            2*) ;;
+            *)
+              echo "::error::Gitee 传附件失败 HTTP=$CODE（发行版 id=$RELEASE_ID 已建好，附件没上去）"
+              echo "  响应体：$(tr -d '\r\n' < attach.json | cut -c1-800)"
+              echo "::error::这个半态最阴：发行版存在但附件缺失 ⇒ 清单的 apkUrl 会永远 404 ⇒ 门禁静默退化成可跳过提示。"
+              echo "::error::请手动往这个发行版补传 $ATTACH_NAME，或按 README『发布手册』整轮走手动。"
+              exit 1
+              ;;
+          esac
+
+          echo "附件已上传。清单里该写的是这条不带 query 的稳定地址（三跳到 foruda 那条签名地址约 15 分钟过期，绝不能抄进清单）："
+          echo "  https://gitee.com/$GITEE_REPO/releases/download/$GITHUB_REF_NAME/$ATTACH_NAME"
+          echo "下一步：把 sha256=$SHA256 与 sizeBytes=$SIZE 补进 update.json，提交并推到 gitee 的 main。"
+          echo "::notice::发布后请 curl -I 上面那条地址确认 200（确认附件真传上去了、tag 与名字拼对了），并检查 Gitee 有没有把它标成 censor_failed（内容审核字段，行为未知）。"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jianyi-${{ github.ref_name }}
+          path: dist/*.apk
+          if-no-files-found: error
+          retention-days: 30

@@ -341,6 +341,130 @@ Gradle 构建**（根构建不 include 它），只为在 macOS 上验证玻璃�
 - **每日推送**基于 WorkManager 持久化周期任务（每 24 小时，推送时刻可在设置页选择，省电策略下可能有几分钟浮动），任务随系统持久化，**设备重启后会自动恢复，无需打开应用重新注册**（开机自启接收器会按设定时刻重新对齐）；Android 13+ 首次开启时申请通知权限。
 - **接口凭证可自填**：设置页「接口凭证（可选）」可填自己的 appid / appkey / apiurl，留空即回退内置公共凭证。取值优先级为「用户自填 > BuildConfig 默认」。
 
+## 发布手册（安卓强制更新链路）
+
+安卓端的强制更新只靠**两样东西**工作，缺一不发：
+
+1. Gitee 仓库根的 `update.json` —— App 从 `https://gitee.com/wuliao11541/WeatherOutfit/raw/main/update.json`
+   读它（raw 域免鉴权，实测 302 → `raw.giteeusercontent.com` → 200，App 不需要任何 token）。
+2. 那份清单 `apkUrl` 指向的 **Gitee Release 附件** —— App 会先对它发 HEAD，跟完三跳落到 2xx 才允许硬门禁。
+   探不到就退成"可跳过提示"，这是"清单已提交但包还没传上去"那段窗口期不把用户锁死的唯一原因。
+
+所以发版这个动作 = **同时把这两样摆到 Gitee 上**。CI 只是把它自动化了，CI 坏掉时手动走第五节即可。
+
+### 一、抬版本号（两处代码 + 一份清单，必须一起改）
+
+| 文件 | 字段 | 现在的值 | 说明 |
+|------|------|---------|------|
+| `app/build.gradle.kts` | `versionCode` / `versionName` | `8` / `2.1.2` | `versionCode` 整数**只增不减**，安卓按它判断能不能覆盖安装 |
+| `update.json` | `versionCode` / `versionName` | `8` / `2.1.2` | 决定"要不要提示更新"，必须与上面两处一致 |
+| `update.json` | `minSupportedVersionCode` | `1` | 低于它的设备会被硬门禁（见第六节） |
+| `update.json` | `apkUrl` | `…/releases/download/v2.1.2/jianyi-2.1.2.apk` | tag 段与文件名都要跟着版本走 |
+| `update.json` | `sha256` / `sizeBytes` / `notes` | 未声明 | **可选**，前两个由 CI 出包后人工回填（第七节） |
+
+只改一边一定会红：`UpdateManifestFileTest` 会读真实的 `update.json` 去对 `BuildConfig.VERSION_CODE` /
+`VERSION_NAME`，并检查 `apkUrl` 里的 `/download/v<versionName>/` 段 —— 这条锁专防"抬了版本号忘了改清单"
+（那种错的表现是**所有人永远收不到更新**，而单元测试、CI、日志全绿）。
+
+### 二、`apkUrl` 的两条硬约束（写错 = 全世界收不到更新，且没有任何报错渠道）
+
+1. **不许带 query 参数**（`?token=…&ts=…` 那种签名地址一律不能进清单）；
+2. **协议必须是小写 `https://`**，且整个 URL 必须以 **`.apk` 结尾**。
+
+解析器 `UpdateManifestParser.isSane()` 的口径是"反序列化成功之后再逐条过语义闸"，
+`!startsWith("https://")` 或 `!endsWith(".apk")` 直接把**整份清单**判为无效 → 判定层得到 `Unreachable`
+→ 界面上什么都不显示。三个具体陷阱：
+
+- 带 query 的地址必然不以 `.apk` 结尾，所以它踩的是同一条闸 —— 症状不是"下载失败"而是"没人收到更新"。
+- `HTTPS://` 只差一个字母的大小写，但 `startsWith` 是区分大小写的，同样整份清单作废。
+- 清单里要写的是那条**人类可读的稳定地址** `https://gitee.com/<ns>/<repo>/releases/download/<tag>/<file>`；
+  它会三跳到 `foruda.gitee.com/…?token=&ts=&attname=`，**那个签名地址约 15 分钟过期**（实测 +14.3min 仍 200、
+  +15.3min 起 401），所以绝不能把最终跳到的地址抄进清单。App 每次下载都自己重新走三跳。
+
+这类错误在 App 端零弹窗、零崩溃、零上报，唯一能观测到的是 logcat/NSLog 里那条
+`清单读到了但判无效` 的 warning（搜 `JianyiUpdate`）。`.github/workflows/release.yml`
+的「Check tag matches update.json」一步会在发布前把这两条查一遍并**红着停下**，
+但前提是你走了 CI —— 手写清单时自己核对。
+
+另外：**附件名一律小写**（`jianyi-2.2.0.apk` 而不是 `Jianyi-2.2.0.Apk`），Gitee 落盘的最终名会小写化，
+别指望靠大小写区分两个版本。
+
+### 三、打 tag 触发 CI 发布
+
+```bash
+git tag v2.2.0
+git push origin v2.2.0                       # workflow 跑在 GitHub 上，tag 要推到 origin
+git push origin main && git push gitee main  # 两份远端都推
+```
+
+**别漏 `git push gitee main`。** App 读的清单是 **Gitee 那份** `raw/main/update.json`；
+只推 GitHub 的表现是"CI 绿了、包也传了，但没有人收到更新"。
+
+`.github/workflows/release.yml` 只在 `push` 一个匹配 `v*` 的 tag 时运行（tag 形状 = `v<versionName>`，
+所以 `v2.2.0` ↔ 清单里的 `2.2.0`）。它按顺序做这些事：报缺哪些 secrets → 签名构建 → 核对 tag 与清单 →
+按清单的附件名归档 APK → 验签 → 算 sha256/sizeBytes 并与清单声明值比对 → 建 Gitee 发行版 → 传附件。
+
+需要的 GitHub secrets（当前**一个都还没配**）：
+
+| Secret | 不给会怎样 |
+|--------|-----------|
+| `RELEASE_KEYSTORE_BASE64` / `RELEASE_KEYSTORE_PASSWORD` / `RELEASE_KEY_ALIAS` / `RELEASE_KEY_PASSWORD` | 缺任一个 ⇒ 本次 run **红**，停在 `Require release signing secrets`。未签名的包不能当更新包发（安卓只允许同签名覆盖安装），这里宁可给红也不给一个"绿而没发出去" |
+| `GITEE_API_TOKEN` | 缺 ⇒ run **绿**，但**没有发布**：`Publish to Gitee Release` 打三条 `::warning::`（含实际 sha256/sizeBytes）后 `exit 0`，APK 只在 Actions 产物里。这时必须走第五节手动传附件 |
+| `WEATHER_API_ID` / `WEATHER_API_KEY` | 缺 ⇒ run 绿并给 `::warning::`，打的是公共演示凭证 `88888888`（与他人共享频次，README 明写不可用于发布） |
+
+> Gitee v5 API **不带 token 一律 403**（连公开仓库都是，实测对照组 `opencv/opencv` 同样 403），
+> 所以别指望 CI 能匿名探测或发布。
+
+### 四、怎么一眼分清"发成功了"和"没发"
+
+- **红 + `未配置签名 secrets`**：什么都没发，补齐四个签名 secret 重跑，或整轮走手动。
+- **绿 + 三条 `::warning::未配置 GITEE_API_TOKEN`**：包构建出来了但**线上没更新**，去 Actions 产物拿
+  `jianyi-<tag>` 里的 APK 走手动上传。这一条最容易被误读成"发过了"，**看 warning 不看勾**。
+- **绿 + `::notice::发布后请 curl -I…`**：真发上去了，仍要按第五节第 3 步复核一次。
+
+### 五、手动兜底全流程（CI 那两步坏掉时走这条）
+
+1. Gitee 网页进仓库 →「发行版」→ 新建发行版，**tag 填 `v2.2.0`**，要和清单 `apkUrl` 的 tag 段逐字一致。
+2. 上传附件：文件名必须是 `jianyi-2.2.0.apk`（= `apkUrl` 的末段；CI 产物里已经是这个名字）。
+3. 复核附件真的在：`curl -I https://gitee.com/wuliao11541/WeatherOutfit/releases/download/v2.2.0/jianyi-2.2.0.apk`
+   → 期望跟完三跳后 **200**。404 = tag 或文件名拼错了 / 没传上去；这条地址不通就等于门禁永远不生效。
+4. 把实际 `sha256` 与 `sizeBytes` 补进 `update.json`（CI 日志和 run 摘要里都有；手算用 `sha256sum` 与
+   `stat -c %s`），提交并**推到 gitee 的 main**。
+5. 发布后到 Gitee 网页确认附件没被标成 `censor_failed`（内容审核字段，行为未知），并真下载一次。
+
+单附件上限 100MB（GVP 200MB）、单仓库附件总量 1GB；release 包实测 4,630,357 字节（未签名，签名后同量级），
+余量充足。
+
+### 六、`minSupportedVersionCode` 什么时候抬
+
+- **该抬**：改了缓存/持久化格式且不做兼容、接口凭证语义变更、任何"旧版继续跑会给出**错误结果**"的改动。
+- **不该抬**：只是加了新功能、修了 bug。
+- 抬上去的后果：`versionCode` 低于它的设备一进 App 就是**全屏门禁，返回键不放行**，唯一出路是装新包 ——
+  而装新包依赖 `apkUrl` 那个附件**真的在**。所以顺序永远是「先发版、确认附件能下载，再让清单生效」。
+- 它**不能高于 `versionCode`**：判定层会用 `minOf` 钳到最新版，这个笔误在运行时被**静默吸收**
+  （表现只是门禁比你想的更严），别处看不见，只有 `UpdateManifestFileTest` 会报。
+
+### 七、`sha256` / `sizeBytes` 为什么是可选字段，以及不回填的代价
+
+清单由人在抬版本号时**手写**，那一刻 APK 还不存在、哈希无从得知；定为必填就只能先填假值（校验必失败）
+或者让 CI 回写清单（CI 又没有 Gitee 写权限）—— 时序死结。所以口径是：
+
+- **声明了就强制校验**：App 下载完比对，不一致就删文件判失败；CI 也会比对，与实际包不一致**直接让构建失败**，
+  连形状不对（不是 64 位小写十六进制）都算错 —— 那种写法会让解析器把整份清单判无效。
+- **没声明则跳过校验**并照常安装。代价是"下载完校验哈希"这道闸**等于不存在**。
+
+CI 每次发布都会把实际值打在日志与 run 摘要里（`## 本次包体实测值`），并留一条
+`::warning::update.json 未声明 sha256`。回填是发版动作的一部分，不是可选项。
+
+### 八、已知没跑过的部分（不假装已完成）
+
+- 那两个 Gitee API 调用（建发行版 / 传附件）只有官方 OpenAPI 规范与匿名 403 的实测，**没有带真 token 跑通过**。
+  第一次真跑就是第一次验证，失败按第五节走手动。
+- token 按规范放 form-data（不是 `Authorization` 头）。若 Gitee 拒绝，先怀疑这一条。
+- `foruda.gitee.com` 忽略 `Range`（实测），所以 APK 下载**没有断点续传**：中途失败就整文件重下。
+- 附件地址对 `HEAD` 答 200 是在**别人的仓库**上实测的（`beijing-jicang/yichenbao`），
+  机制已证；我们自己第一个真 Release 出来后仍要按第五节第 3 步复核一次自己的地址。
+
 ## 开源协议
 
 本项目基于 [MIT License](LICENSE) 开源，作者「莫」。
