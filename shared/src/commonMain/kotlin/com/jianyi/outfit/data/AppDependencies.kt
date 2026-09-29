@@ -39,6 +39,17 @@ interface AppDependencies {
     val notificationGate: NotificationGate
     val extremeAlerter: ExtremeAlerter
 
+    /**
+     * 装机包版本（Android 由 BuildConfig 注入；commonMain 不许直接碰 BuildConfig）。
+     *
+     * 这条注释故意写成多行块而不是单行 KDoc：tools/kotlin_lint.py 的平台泄漏扫描
+     * 只跳跨行的块注释，落在单行注释里的那个类名会被当成代码，报一条假阳性。
+     */
+    val appVersion: AppVersion
+
+    /** 应用内更新能力；iOS 恒 supported=false，UI 据此整块不显示 */
+    val updateGateway: AppUpdateGateway
+
     /** 高帧率申请的状态视图（Android 独有；iOS 实现恒为「不支持」） */
     val highFrameRate: HighFrameRateApi
 
@@ -131,4 +142,40 @@ interface NotificationGate {
 /** 极端天气预警通知：拿到预警且用户开了开关时立即发一条 */
 interface ExtremeAlerter {
     fun show(title: String, text: String)
+}
+
+/** 装机包版本。versionName 给人看，versionCode 给判定用。 */
+data class AppVersion(val versionCode: Int, val versionName: String)
+
+/** 拉起系统安装页的结果。分开三种是因为 UI 要说的话完全不同。 */
+enum class InstallResult {
+    /** 安装页已弹出 */
+    Launched,
+
+    /** 还没授予"安装未知应用"，调用方应接着 requestInstallPermission() */
+    PermissionMissing,
+
+    /** 弹不出来（FileProvider 路径不对、URI 被拒等） */
+    Failed
+}
+
+/**
+ * 应用内更新的平台能力。
+ *
+ * 刻意不含下载：下载是 Ktor + 落盘，跨端都能写，放在 shared；
+ * 这里只收"只有系统能给的东西"——权限状态、权限引导、拉起安装页。
+ *
+ * iOS 侧 supported=false 而不是抛异常：这个功能在 iOS 上不是"坏了"，
+ * 是规则不允许（App Store 应用不能自建更新通道）。
+ */
+interface AppUpdateGateway {
+    val supported: Boolean
+
+    /** 无需权限的平台上恒 true */
+    fun hasInstallPermission(): Boolean
+
+    /** 跳到系统设置里的"安装未知应用"页；已经在设置页里就不必自查 */
+    fun requestInstallPermission()
+
+    fun install(apkPath: String): InstallResult
 }

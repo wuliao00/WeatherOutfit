@@ -1,6 +1,8 @@
 package com.jianyi.outfit
 
 import com.jianyi.outfit.data.AppDependencies
+import com.jianyi.outfit.data.AppUpdateGateway
+import com.jianyi.outfit.data.AppVersion
 import com.jianyi.outfit.data.CitySelection
 import com.jianyi.outfit.data.ExtremeAlerter
 import com.jianyi.outfit.data.HighFrameRateApi
@@ -25,6 +27,7 @@ import com.jianyi.outfit.platform.IosHighFrameRate
 import com.jianyi.outfit.platform.IosLocationProvider
 import com.jianyi.outfit.platform.IosNotificationGate
 import com.jianyi.outfit.platform.IosPushScheduler
+import com.jianyi.outfit.platform.IosUpdateGateway
 import com.jianyi.outfit.ui.scenery.SceneryController
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -72,6 +75,18 @@ class IosAppDependencies : AppDependencies {
     override val notificationGate: NotificationGate = IosNotificationGate()
 
     override val extremeAlerter: ExtremeAlerter = IosExtremeAlerter()
+
+    /**
+     * 占位值，不是"iOS 上的真实版本"：updateGateway.supported 恒 false，
+     * 门禁与设置页入口整块不渲染，判定链根本走不到读这个字段的那一步。
+     *
+     * 写成常量而不是去解析 Info.plist 的 CFBundleVersion，是为了不在这条永远走不到的
+     * 路上引入新的平台代码。将来若真要做 TestFlight 引导，再换成读 plist。
+     */
+    override val appVersion: AppVersion = AppVersion(versionCode = 1, versionName = "0.0.0")
+
+    /** iOS 不提供应用内更新（App Store 规则），详见 [IosUpdateGateway] */
+    override val updateGateway: AppUpdateGateway = IosUpdateGateway()
 
     override val highFrameRate: HighFrameRateApi = IosHighFrameRate
 

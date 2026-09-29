@@ -3,6 +3,8 @@ package com.jianyi.outfit.di
 import android.content.Context
 import com.jianyi.outfit.BuildConfig
 import com.jianyi.outfit.data.AppDependencies
+import com.jianyi.outfit.data.AppUpdateGateway
+import com.jianyi.outfit.data.AppVersion
 import com.jianyi.outfit.data.CitySelection
 import com.jianyi.outfit.data.ExtremeAlerter
 import com.jianyi.outfit.data.HighFrameRateApi
@@ -30,6 +32,7 @@ import com.jianyi.outfit.util.AndroidLocationProvider
 import com.jianyi.outfit.util.AndroidNotificationGate
 import com.jianyi.outfit.util.LocationUtil
 import com.jianyi.outfit.ui.scenery.SceneryController
+import com.jianyi.outfit.update.AndroidUpdateGateway
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -110,6 +113,14 @@ class AppContainer(context: Context) : AppDependencies {
         override fun show(title: String, text: String) =
             Notifier.showExtremeAlert(context.applicationContext, title, text)
     }
+
+    /** 装机包版本：BuildConfig 是 Android 产物，只能在这里读出去给 shared 用 */
+    override val appVersion: AppVersion =
+        AppVersion(BuildConfig.VERSION_CODE, BuildConfig.VERSION_NAME)
+
+    /** 应用内更新的平台能力（下载在 shared，权限与安装页在这里） */
+    override val updateGateway: AppUpdateGateway =
+        AndroidUpdateGateway(context.applicationContext)
 
     /**
      * 风景背景控制器（全应用单例）。
