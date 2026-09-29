@@ -24,6 +24,7 @@ import com.jianyi.outfit.data.repository.SettingsRepository
 import com.jianyi.outfit.data.repository.SettingsRepositoryImpl
 import com.jianyi.outfit.data.repository.WeatherRepository
 import com.jianyi.outfit.data.repository.WeatherRepositoryImpl
+import com.jianyi.outfit.data.update.ApkDownloader
 import com.jianyi.outfit.data.update.KtorUpdateHttp
 import com.jianyi.outfit.data.update.UpdateRepository
 import com.jianyi.outfit.notification.DailyPushScheduler
@@ -35,7 +36,6 @@ import com.jianyi.outfit.util.AndroidNotificationGate
 import com.jianyi.outfit.util.LocationUtil
 import com.jianyi.outfit.ui.scenery.SceneryController
 import com.jianyi.outfit.ui.update.UpdateViewModel
-import com.jianyi.outfit.ui.update.UnsupportedInstaller
 import com.jianyi.outfit.ui.update.newUpdateViewModel
 import com.jianyi.outfit.update.AndroidUpdateGateway
 import kotlinx.coroutines.CoroutineScope
@@ -140,15 +140,17 @@ class AppContainer(context: Context) : AppDependencies {
      * 更新状态机。构造走 [newUpdateViewModel] 这个共享构造点，理由是它 5 个参数里有 3 个
      * 都是接口 —— 两端各 new 一次的时候，顺序换了编译器不会响。
      *
-     * installer 暂时是 [UnsupportedInstaller]：Task 7 才落地的 ApkDownloader 现在还不存在。
-     * 表现是门禁上点"立即更新"会直接进失败态（"写入失败，请清理手机存储后重试"），
-     * 而不是点了没反应 —— 宁可报得难看，也不要摆一颗按下去什么都不做的按钮。
-     * Task 7 落地时把这一行换成 ApkDownloader(context.applicationContext)。
+     * installer 现在是 Task 7 落地的 [ApkDownloader]（Task 6 那一轮这里是 UnsupportedInstaller，
+     * 表现是门禁上点「立即更新」直接进失败态）。这一行是"功能死不死"的分界：
+     * `UpdateViewModelTest` 那 25 条用例测的是状态机，它们用注入的假 ApkInstaller，
+     * 所以哪怕这里忘换、真机永远下不下来，全套单测仍然一条不红。
+     * 换掉它不写在这里容易被当成"收尾工作顺手做的"，所以留一句：容器接线没有测试覆盖，
+     * 它是本轮唯一只能靠读 diff 与真机确认的改动点。
      */
     override val updateViewModel: UpdateViewModel = newUpdateViewModel(
         appVersion = appVersion,
         checker = UpdateRepository(KtorUpdateHttp()),
-        installer = UnsupportedInstaller,
+        installer = ApkDownloader(context.applicationContext),
         gateway = updateGateway,
         scope = updateScope
     )
