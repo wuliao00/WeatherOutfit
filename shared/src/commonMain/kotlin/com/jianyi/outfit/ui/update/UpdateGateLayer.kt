@@ -48,7 +48,7 @@ import kotlinx.coroutines.launch
  *
  * 三条硬规矩：
  * 1. **门禁不提供任何关闭入口**。按钮集合由 [gateActions] 决定并被用例钉住；
- *    返回键拦截在 Task 8（判据复用 [gateHoldsPage]，两处不许各写一份），这一层不"顺手"加一颗关闭按钮。
+ *    返回键拦截在 Task 8（判据复用 [UpdateUiState.blocksUser]，两处不许各写一份），这一层不"顺手"加一颗关闭按钮。
  * 2. **整页都是半透明玻璃**：卡片走 `GlassSurface`、按钮走现成的 `GlassPill`。
  *    仓库里没有 `GlassButton`，`GlassShapes` 里也没有 `pill` 那一档（只有
  *    card/inner/chip/bar/sheet/circle），所以这里既不自造第二颗按钮、也不新增形状常量。
@@ -84,7 +84,7 @@ fun UpdateGateLayer(vm: UpdateViewModel) {
     // 那样用例断言的列表和这里画的列表是两份，"按住整页 + 零按钮"就藏在接缝里。
     val hasUrl = url != null
     val actions = gateActions(state, hasUrl)
-    val holdsPage = gateHoldsPage(state, hasUrl)
+    val holdsPage = state.blocksUser(hasUrl)
     val download = gateDownloadView(state)
 
     Box(

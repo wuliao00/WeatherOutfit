@@ -23,7 +23,7 @@ import com.jianyi.outfit.ui.components.DisclaimerDialog
 import com.jianyi.outfit.ui.navigation.AppNavHost
 import com.jianyi.outfit.ui.root.RootScreen
 import com.jianyi.outfit.ui.update.UpdateUiState
-import com.jianyi.outfit.ui.update.gateHoldsPage
+import com.jianyi.outfit.ui.update.blocksUser
 import com.jianyi.outfit.util.FrameRate
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -46,8 +46,14 @@ class MainActivity : ComponentActivity() {
         // 而不是某个页面自己的状态 —— 两个来源的返回键判据迟早会漂。
         val updateBackCallback = UpdateBackKeyCallback()
         onBackPressedDispatcher.addCallback(this, updateBackCallback)
+        val updateVm = container.updateViewModel
         lifecycleScope.launch {
-            container.updateViewModel.state.collect { updateBackCallback.sync(it) }
+            // hasUrl 这一维取的是 `updateVm.apkUrl() != null`，与 UpdateGateLayer 里喂给
+            // 同一个判据（blocksUser）的是**同一个表达式**，不是两处各写一份再靠注释约定一致。
+            // collect 收到一帧的时候 `_state.value` 就是那一帧，所以这里不会读到串了的清单。
+            updateVm.state.collect { state ->
+                updateBackCallback.sync(state, updateVm.apkUrl() != null)
+            }
         }
 
         setContent {
@@ -86,17 +92,24 @@ class MainActivity : ComponentActivity() {
 /**
  * 门禁期间要不要吞掉返回键。
  *
- * 判据**复用 Task 6 的 `gateHoldsPage`**，不在这再写一份 when。那个函数决定的是
- * "门禁层要不要盖遮罩、吃掉点击"，返回键是同一件事的另一半：两处各写一份的结果
+ * 判据**复用 Task 6 的 `UpdateUiState.blocksUser`**（原名 gateHoldsPage），不在这再写一份 when。
+ * 那个函数决定的是"门禁层要不要盖遮罩、吃掉点击"，返回键是同一件事的另一半：两处各写一份的结果
  * 必然是"卡片还按着你、返回键却能退"或者反过来"卡片放开了、返回键还在吞"
- * （UpdateCopy.kt 里 gateHoldsPage 的注释点名的就是这个漂移）。
+ * （UpdateCopy.kt 里那条注释点名的就是这个漂移）。
  *
- * 于是 Failed 不吞，连 forced 也不吞：计划的 Goal 写的就是"任何失败都能退出而不锁死用户"，
- * 而那一态本来也不拦点击，只吞返回键的净效果是"页面照常能用、唯独退不出去"。
+ * `hasUrl` 必须由调用方显式交进来（终审修复轮第 2 条）：这个判据从前带一个 `= true` 的默认值，
+ * 而门禁层传的是真值、这一侧吃的是默认 —— 判据只有一份、输入有两份，那就是以后长出错的地方。
+ * 现在 onCreate 与 `UpdateGateLayer` 交给同一个函数的都是 `vm.apkUrl() != null` 这同一个表达式。
+ *
+ * 于是 Failed 不吞，连 forced 也不吞：计划的 Goal 写的就是"任何失败都能退出而不锁死用户"（spec §7.1，
+ * **失败逃生**），而那一态本来也不拦点击，只吞返回键的净效果是"页面照常能用、唯独退不出去"。
  * 强制下载中必须吞，则是 Task 5 把 `forced` 塞进 Downloading 的理由 ——
  * 少了它，下到大一半按一次返回就回到旧版继续用，门禁被它要防的动作本身绕过。
+ *
+ * 但**安装页弹出去（`InstallResult.Launched`）不算放开**：那一态在 VM 里落回 `Gate`，
+ * 所以这里仍然吞返回键。§7.1 那条不适用于它 —— 那是"失败逃生"，这里是"成功之后绕过"。
  */
-internal fun shouldBlockBack(state: UpdateUiState): Boolean = gateHoldsPage(state)
+internal fun shouldBlockBack(state: UpdateUiState, hasUrl: Boolean): Boolean = state.blocksUser(hasUrl)
 
 /**
  * 随状态开/关的返回键回调。
@@ -120,8 +133,8 @@ internal class UpdateBackKeyCallback : OnBackPressedCallback(false) {
      * 状态 → 开关。onCreate 里的 collect 与单测都走这一个入口，
      * 两边共用同一个判据才不会漂。
      */
-    fun sync(state: UpdateUiState) {
-        isEnabled = shouldBlockBack(state)
+    fun sync(state: UpdateUiState, hasUrl: Boolean) {
+        isEnabled = shouldBlockBack(state, hasUrl)
     }
 }
 

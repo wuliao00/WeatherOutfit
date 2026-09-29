@@ -83,7 +83,13 @@ interface ApkInstaller {
  * Task 8 的返回键拦截就会在下载中途放行 —— 门禁被一次返回键绕过。
  */
 sealed interface UpdateUiState {
-    /** 什么都没有：还没查、没有更新、查失败，或者安装页已经弹出去了 */
+    /**
+     * 什么都没有：还没查、没有更新、查失败；非强制那一档在安装页弹出去之后也回到这里。
+     *
+     * **强制那一档不在这一态里出现**：`InstallResult.Launched` 只代表安装页弹出去了、
+     * 不代表装完了，门禁必须留在 `Gate` 上（见 [UpdateViewModel.onDownloaded] 那段）。
+     * 这一句从前写的是"或者安装页已经弹出去了"，那句话就是 C1 本身。
+     */
     data object Hidden : UpdateUiState
 
     /** 有新版本，可以跳过 */
@@ -313,8 +319,35 @@ class UpdateViewModel(
 
     private fun onDownloaded(manifest: UpdateManifest, path: String) {
         when (gateway.install(path)) {
-            // 装完了必须回到 Hidden：门禁卡片继续挂着就是"装完了还拦着"
-            InstallResult.Launched -> _state.value = UpdateUiState.Hidden
+            // **`Launched` ≠ 装完了。** 它的语义只有一个：`AndroidUpdateGateway` 成功
+            // startActivity、把系统安装页弹到了前台（AndroidUpdateGateway.kt:123）。
+            // 那一刻包还没装上，用户随时能在安装页按「取消」或返回键走回本 App ——
+            // 如果这一态退回 Hidden，遮罩与返回键会在同一帧同时松开，于是
+            // **门禁 → 下完 55MB → 安装页弹 → 按取消 → 回到一个完全没有门禁的旧版**，
+            // 直到杀进程为止，而且全程零红：
+            //   · runCheck 里那道"禁止 Gate→Hidden"只管**检查**路径，管不到下载路径；
+            //   · checkedThisLaunch 与 LaunchedEffect(Unit) 都不会再触发第二次检查；
+            //   · 判定层每次冷启动重算，所以这次启动内再也没有任何东西会把它挂回来。
+            // 这一条曾经被 `launched_install_hides_the_gate` 钉成期望 —— 那是"每一层各自
+            // 看起来正确、拼起来是死的"这个类别在本分支上的第四例，而且它在**成功路径**上。
+            //
+            // 所以强制那一档与 PermissionMissing 同一处理：留在门禁里。
+            // **留在门禁里不会把"真的装成功了"的用户锁在外面**：装成功必然由安装器杀掉本进程，
+            // 下次冷启动是新 VM、判定层读到 versionCode 已达标 ⇒ UpToDate ⇒ 门禁自然消失；
+            // 落盘里没有任何"已跳过/已安装"状态，所以也没有东西需要复位。
+            // 反过来说，按取消回来的用户看到的正是本该看到的东西：还是不更新就不能用的门禁，
+            // 而那颗「立即更新」只是再下一遍（downloadJob 防重入，包已在 cacheDir 会被覆盖）。
+            //
+            // 别拿 spec §7.1 给这一态辩护：§7.1 放开的是 `Failed` 的遮罩与返回键，
+            // 那是"**失败逃生**"（下不下来必须能走）；这里是"**成功之后绕过**"，
+            // 包就在用户手边、只是那一步他没按。两条不是同一类，两条都要保住 ——
+            // 尤其不许顺手把 Failed 改回锁死。
+            InstallResult.Launched ->
+                _state.value = if (forcedThisLaunch) {
+                    UpdateUiState.Gate(manifest)
+                } else {
+                    UpdateUiState.Hidden
+                }
 
             // 用户没给"安装未知应用"权限：跳系统设置页。
             // **门禁不许退成可跳过卡片** —— 那等于"只要拒绝授权，强更就自动变成可跳过"，

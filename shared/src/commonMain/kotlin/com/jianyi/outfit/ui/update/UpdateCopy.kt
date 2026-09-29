@@ -17,7 +17,7 @@ import com.jianyi.outfit.data.update.UpdateManifest
  * 判据放到这里来测，UI 那一层只许照着画，不许自己再判一次。
  *
  * ## 三条判据刻意不合并
- * [gateIsForced]（文案分量 + 有没有关闭入口）、[gateHoldsPage]（要不要按住整页）、
+ * [gateIsForced]（文案分量 + 有没有关闭入口）、[UpdateUiState.blocksUser]（要不要按住整页）、
  * [gateActions]（摆哪几颗按钮）合起来看着像"是不是门禁"这一件事，其实是三件：
  * 合并前两条会让下载失败之后仍然按住用户（下不下来、又走不掉）；
  * 合并后两条会给 Failed 摆一颗按下去毫无反应的"以后再说"（VM 的 dismissOptional
@@ -63,10 +63,10 @@ fun gateIsForced(state: UpdateUiState): Boolean = when (state) {
 }
 
 /**
- * 这一态要不要把整页按住（盖遮罩 + 吃掉点击）。
+ * 这一态要不要把用户按住：遮罩、吃掉点击、吞返回键，**三件事共用这一个判据**。
  *
  * 与 [gateIsForced] 刻意差一个分支：Failed 不拦 —— 一直下不下来的时候必须让人走，
- * 否则这个功能自己把它要保护的"任何失败都能退出"给反噬了。
+ * 否则这个功能自己把它要保护的"任何失败都能退出"给反噬了（spec §7.1，**这是"失败逃生"**）。
  * Task 8 的返回键判据应当复用这个函数：两处各写一份 when 的结果，
  * 就是"返回键能退、卡片还按着你"或者"卡片放开了、返回键还在吞"。
  *
@@ -74,13 +74,21 @@ fun gateIsForced(state: UpdateUiState): Boolean = when (state) {
  * 所以连地址都没有时，按住整页就等于"一块吃点击、零按钮"的膜 —— 用户只能杀进程。
  * 那一态此刻没有任何可完成的动作，放开页面才是"不许锁死用户"的写法。
  *
- * 默认值是 true，因为返回键那一侧（`shouldBlockBack`）**只看状态**：
- * 有没有地址是卡片渲染层面的信息，而返回键放开就意味着"这一档可以跳过"，
- * 那不是这一层该做的决定。
+ * ## 为什么这个参数没有默认值（2026-09-30 终审修复轮）
+ * 从前它写作 `hasUrl: Boolean = true`，而两个调用点用法不一样：门禁层传真值，
+ * 返回键那一侧（`shouldBlockBack`）用默认 —— 那正是本函数上一版（`gateHoldsPage`）的注释
+ * 点名禁止的"两处各写一份"，只不过漂的是**输入**而不是判据。今天这条漂移不可达
+ * （`apkUrl` 为空时状态是 Hidden），但不可达的重复正是以后长出错的地方。
+ * 去掉默认值之后，"返回键那一侧偷偷按 true 算"在类型上就不存在了：
+ * 两个调用点都必须显式交出自己那份 `hasUrl`，而它们交的是同一个表达式 `vm.apkUrl() != null`。
  */
-fun gateHoldsPage(state: UpdateUiState, hasUrl: Boolean = true): Boolean = when (state) {
+fun UpdateUiState.blocksUser(hasUrl: Boolean): Boolean = when (this) {
     is UpdateUiState.Gate -> true
-    is UpdateUiState.Downloading -> state.forced && hasUrl
+    is UpdateUiState.Downloading -> forced && hasUrl
+
+    // Failed 放开是刻意的（spec §7.1）：下不下来必须能走。
+    // 别把 Launched 也照这一条放开 —— 安装页弹出去之后状态是 Gate 不是 Failed，
+    // 那一态的语义是"成功之后绕过"，与"失败逃生"不是一类，见 UpdateViewModel.onDownloaded。
     else -> false
 }
 
@@ -140,7 +148,7 @@ fun gateActions(state: UpdateUiState, hasUrl: Boolean): List<GateAction> = when 
 
     // 门禁下载中：唯一给的是复制链接 —— 24MB 的路上不能一个出口都没有，
     // 而复制链接不关闭任何东西，所以它不违反"门禁没有关闭入口"。
-    // 没有地址时一颗都不给：那种情况下 gateHoldsPage 也必须跟着放开（见那个函数）。
+    // 没有地址时一颗都不给：那种情况下 blocksUser 也必须跟着放开（见那个函数）。
     is UpdateUiState.Downloading -> when {
         !state.forced -> emptyList()
         hasUrl -> listOf(GateAction.CopyLink)

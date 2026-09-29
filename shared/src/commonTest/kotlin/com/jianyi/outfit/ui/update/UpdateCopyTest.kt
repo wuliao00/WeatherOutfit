@@ -227,7 +227,7 @@ class UpdateCopyTest {
             val drawn = gateActions(state, hasUrl = false)
             if (drawn.isEmpty()) {
                 assertFalse(
-                    gateHoldsPage(state, hasUrl = false),
+                    state.blocksUser(hasUrl = false),
                     "${state::class.simpleName} 在没有下载地址时既按住整页又零按钮 —— 只能杀进程"
                 )
             }
@@ -237,10 +237,12 @@ class UpdateCopyTest {
     /** 遮罩与按钮这两份判据必须一起改：有地址照旧按住，没地址就放开 */
     @Test fun a_forced_download_holds_the_page_only_when_it_can_offer_the_link() {
         val forcedDownloading = UpdateUiState.Downloading(MANIFEST, done = null, total = TOTAL, forced = true)
-        assertTrue(gateHoldsPage(forcedDownloading, hasUrl = true))
-        assertFalse(gateHoldsPage(forcedDownloading, hasUrl = false))
-        // 返回键那一侧（Task 8）只看状态，默认 hasUrl=true，判据不漂
-        assertTrue(gateHoldsPage(forcedDownloading))
+        assertTrue(forcedDownloading.blocksUser(hasUrl = true))
+        assertFalse(forcedDownloading.blocksUser(hasUrl = false))
+        // 这一维现在**没有默认值可依赖**（终审修复轮去掉的）：两个调用点都得显式交出自己那份，
+        // 所以这里能钉的对应关系换成"Gate 那一态根本不看地址" ——
+        // 它与 gateActions(Gate) 恒给「立即更新」是同一件事，拦住用户不依赖有没有复制链接。
+        assertTrue(UpdateUiState.Gate(MANIFEST).blocksUser(hasUrl = false))
         assertEquals(listOf(GateAction.CopyLink), gateActions(forcedDownloading, hasUrl = true))
         assertEquals(emptyList(), gateActions(forcedDownloading, hasUrl = false))
     }
@@ -295,7 +297,7 @@ class UpdateCopyTest {
 
     @Test fun hidden_state_gives_the_layer_nothing_to_draw() {
         assertEquals(emptyList(), gateActions(UpdateUiState.Hidden, hasUrl = true))
-        assertFalse(gateHoldsPage(UpdateUiState.Hidden))
+        assertFalse(UpdateUiState.Hidden.blocksUser(hasUrl = true))
         assertNull(gateDownloadView(UpdateUiState.Hidden))
         assertNull(gateManifest(UpdateUiState.Hidden))
     }
@@ -303,9 +305,9 @@ class UpdateCopyTest {
     // ========== 谁按住整页（与 Task 8 的返回键同一条判据） ==========
 
     @Test fun the_gate_and_its_own_download_hold_the_page() {
-        assertTrue(gateHoldsPage(UpdateUiState.Gate(MANIFEST)))
+        assertTrue(UpdateUiState.Gate(MANIFEST).blocksUser(hasUrl = true))
         assertTrue(
-            gateHoldsPage(UpdateUiState.Downloading(MANIFEST, done = null, total = TOTAL, forced = true)),
+            UpdateUiState.Downloading(MANIFEST, done = null, total = TOTAL, forced = true).blocksUser(hasUrl = true),
             "门禁下载中途放开点击，用户就能在包下完之前去用旧版"
         )
     }
@@ -315,8 +317,8 @@ class UpdateCopyTest {
      * 这同时是"非强制档没给以后再说也不锁人"的前提。
      */
     @Test fun an_optional_card_never_holds_the_page() {
-        assertFalse(gateHoldsPage(UpdateUiState.OptionalCard(MANIFEST)))
-        assertFalse(gateHoldsPage(UpdateUiState.Downloading(MANIFEST, done = null, total = null, forced = false)))
+        assertFalse(UpdateUiState.OptionalCard(MANIFEST).blocksUser(hasUrl = true))
+        assertFalse(UpdateUiState.Downloading(MANIFEST, done = null, total = null, forced = false).blocksUser(hasUrl = true))
     }
 
     /**
@@ -324,7 +326,7 @@ class UpdateCopyTest {
      * 两处若各写一份 when，就会出现"返回键能退、卡片还按着你"。
      */
     @Test fun a_failed_download_stops_holding_the_page_even_under_a_gate() {
-        assertFalse(gateHoldsPage(UpdateUiState.Failed(MANIFEST, DownloadFailure.Network, forced = true)))
+        assertFalse(UpdateUiState.Failed(MANIFEST, DownloadFailure.Network, forced = true).blocksUser(hasUrl = true))
     }
 
     // ========== 标题 ==========

@@ -358,10 +358,15 @@ class UpdateViewModelTest {
         val s = assertIs<UpdateUiState.Gate>(vm.state.value, "一次断网的检查不许解除门禁")
         assertEquals(MANIFEST, s.manifest, "重新挂上的门禁必须还是原来那份清单（apkUrl 不能丢）")
         assertEquals(UpdateVerdict.Unreachable, vm.lastVerdict.value, "结论照实发布，只是不解除门禁")
-        // 粘滞的另一半：之后每个状态都还得记得自己是门禁（Task 8 的返回键读这个字段）
+        // 粘滞的另一半：之后每个状态都还得记得自己是门禁（Task 8 的返回键读这个字段）。
+        // 这里连"下载成功、安装页弹出去"都要仍然是门禁 —— 见
+        // a_launched_install_keeps_the_gate，同一批语义的两端。
         vm.startDownload()
         advanceUntilIdle()
-        assertIs<UpdateUiState.Hidden>(vm.state.value, "FakeInstaller 的成功终态会把状态推到 Hidden（装完了）")
+        assertIs<UpdateUiState.Gate>(
+            vm.state.value,
+            "FakeInstaller 成功 ⇒ Launched ⇒ 安装页只是弹出去了，门禁不许在这一刻松开"
+        )
     }
 
     /**
@@ -389,8 +394,8 @@ class UpdateViewModelTest {
         advanceUntilIdle()
         val failed = assertIs<UpdateUiState.Failed>(vm.state.value)
         assertTrue(failed.forced, "门禁下的失败要记得自己是门禁")
-        // 失败态放开页面（gateHoldsPage 在 Failed 为 false）是刻意的：下不下来必须能走。
-        assertFalse(gateHoldsPage(failed))
+        // 失败态放开页面（blocksUser 在 Failed 为 false）是刻意的：下不下来必须能走。
+        assertFalse(failed.blocksUser(hasUrl = true))
 
         vm.forceCheck()
         advanceUntilIdle()
@@ -420,12 +425,52 @@ class UpdateViewModelTest {
         assertEquals(APK_PATH, gateway.installedPath)
     }
 
-    /** 装成功后状态必须回到 Hidden：门禁卡片继续挂着就是"装完了还拦着" */
-    @Test fun launched_install_hides_the_gate() = runTest {
-        val vm = checkedVm(this, UpdateVerdict.Forced)
+    /**
+     * **`Launched` ≠ 装完了**，所以门禁不许在这一刻松开。
+     *
+     * 这条用例从前叫 `launched_install_hides_the_gate`，断言的是 `Hidden` ——
+     * 那等于把 C1 钉成期望：`InstallResult.Launched` 只代表 `AndroidUpdateGateway`
+     * 成功 startActivity、安装页弹到了前台（它不是"安装完成"的回调，安卓也没有这种回调）。
+     * 于是"门禁 → 下完 55MB → 安装页弹 → 状态 Hidden（遮罩与返回键同帧松开）→
+     * 用户在安装页按取消 → 回到一个完全没有门禁的旧版，直到杀进程"，全程零红。
+     *
+     * 锁的方向反过来之后，这条钉的是：强制那一档走完下载、安装页弹出去，状态**仍然必须是
+     * 那份清单的 Gate**，用户按取消回到 App 还是被拦着。
+     *
+     * 与 spec §7.1 无关，不要混：§7.1 放开 `Failed` 的遮罩与返回键是"**失败逃生**"
+     * （一直下不下来的时候必须能走），这里是"**成功之后绕过**"（包就在手边、只差那一步没按）。
+     * 两条是相反的语义，都要保住。
+     */
+    @Test fun a_launched_install_keeps_the_gate_because_launching_is_not_installing() = runTest {
+        val gateway = FakeGateway(installResult = InstallResult.Launched)
+        val vm = checkedVm(this, UpdateVerdict.Forced, gateway = gateway)
         vm.startDownload()
         advanceUntilIdle()
-        assertIs<UpdateUiState.Hidden>(vm.state.value)
+        val s = assertIs<UpdateUiState.Gate>(
+            vm.state.value,
+            "安装页弹出去不等于装完了：强制那一档回到 App 时必须还在门禁里"
+        )
+        assertEquals(MANIFEST, s.manifest, "挂着的必须还是这次要装的那份清单，否则再点下载就没有 apkUrl")
+        assertEquals(APK_PATH, gateway.installedPath, "前提：安装页确实被弹出去了，不是压根没弹")
+        // 取消安装回来之后仍然没有任何关闭入口，返回键也仍然按门禁算
+        vm.dismissOptional()
+        assertIs<UpdateUiState.Gate>(vm.state.value, "留在门禁里之后也不许多出一个关闭入口")
+        assertTrue(s.blocksUser(hasUrl = true))
+        assertTrue(gateIsForced(s), "留在门禁里之后文案分量仍然得是门禁那一套")
+    }
+
+    /**
+     * 非强制那一档在安装页弹出去之后仍然可以消失：它本来就可跳过，
+     * 拦着一个已经不必更新的人只会让他杀进程。这一条是上一条的反面对照 ——
+     * 少了它，"强制才留"会被写成"两种都留"，那张可跳过的卡片就变成了关不掉的。
+     */
+    @Test fun a_launched_install_still_hides_a_non_forced_card() = runTest {
+        val gateway = FakeGateway(installResult = InstallResult.Launched)
+        val vm = checkedVm(this, UpdateVerdict.Optional, gateway = gateway)
+        vm.startDownload()
+        advanceUntilIdle()
+        assertIs<UpdateUiState.Hidden>(vm.state.value, "非强制的那一档弹出安装页就该收掉卡片")
+        assertEquals(APK_PATH, gateway.installedPath, "前提同样是安装页真的被弹出去了")
     }
 
     /**
@@ -505,10 +550,11 @@ class UpdateViewModelTest {
         assertNull(s.done, "还没有进度就该是不确定态，而不是 0 字节")
         assertEquals(24_115_200L, s.total)
         assertEquals(BIG_MANIFEST, s.manifest)
-        // 收尾：让挂起的那次下载落地，顺带确认它真能走出 Downloading
+        // 收尾：让挂起的那次下载落地，顺带确认它真能走出 Downloading ——
+        // 落点是门禁而不是 Hidden，因为 Success ⇒ Launched 只代表安装页弹出去了（见 C1 那条）。
         installer.outcome.complete(DownloadEvent.Success(APK_PATH))
         advanceUntilIdle()
-        assertIs<UpdateUiState.Hidden>(vm.state.value)
+        assertIs<UpdateUiState.Gate>(vm.state.value)
     }
 
     /** 反面对照：可跳过那一档下载中不许被误标成门禁（否则返回键把用户困在一张可跳过的卡片上） */
