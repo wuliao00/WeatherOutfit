@@ -40,6 +40,21 @@ COMMON_MAIN_BANNED = re.compile(
 )
 
 
+def _split_raw_strings(code: str):
+    """把一行里成对的三引号原始字符串切掉，返回 (剩下的代码, 是否跨行未闭合).
+
+    为什么需要：`UpdateManifestTest` 里那些 `\"\"\"{\"versionCode\":9,...}\"\"\"` 的 JSON 夹具
+    带满 `{` `}`，按普通字符串处理时 `\"\"\"` 会被当成两个空串，
+    于是 JSON 的花括号进了括号栈 —— 结果是这个工具对着一份语法完全正常的测试文件
+    报 4 条括号错。**一个会喊错的门，最后教会大家的是忽略它**，所以这里必须把它修准。
+    """
+    parts = code.split(TRIPLE)
+    if len(parts) == 1:
+        return code, False
+    # parts[0] / parts[2] / ... 是代码，夹在中间的是字符串内容
+    return "".join(parts[0::2]), len(parts) % 2 == 0
+
+
 def scan_platform_leaks(text: str):
     """Yield (line, message) for JVM-only references that would break the iOS build.
 
@@ -49,7 +64,14 @@ def scan_platform_leaks(text: str):
     所以复用同一个扫描器跳过字符串与注释。
     """
     in_block = False
+    in_raw = False
     for ln, line in enumerate(text.splitlines(), 1):
+        if in_raw:
+            end = line.find(TRIPLE)
+            if end < 0:
+                continue
+            line = line[end + len(TRIPLE):]
+            in_raw = False
         if in_block:
             if "*/" in line:
                 in_block = False
@@ -60,6 +82,11 @@ def scan_platform_leaks(text: str):
             in_block = True
             line = line.split("/*", 1)[0]
         code = line.split("//", 1)[0]
+        # 单行块注释（含 `/** … BuildConfig … */` 这种单行 KDoc）整段剥掉：
+        # 原来只处理"跨行块注释"，于是把禁用词写在**一行的** KDoc 里就会误报，
+        # 而计划里逐字给过那样一行 —— 实现者照抄就得到一条假问题。
+        code = re.sub(r"/\*.*?\*/", "", code)
+        code, in_raw = _split_raw_strings(code)
         # 去掉字符串字面量，避免把文档示例里的引号内容当成代码
         code = re.sub(r'"(?:[^"\\]|\\.)*"', '""', code)
         m = COMMON_MAIN_BANNED.search(code)
@@ -79,15 +106,26 @@ CLASS_HEADER = re.compile(
 )
 
 
+TRIPLE = '"""'
+
+
 def scan(text: str):
     """Yield (line, message) problems. Tracks strings and both comment styles."""
     depth = {"(": 0, "{": 0, "[": 0}
     pairs = {")": "(", "}": "{", "]": "["}
     owners = {}  # opener char -> line it opened on
     in_block = False
+    in_raw = False
     stack = []
 
     for ln, line in enumerate(text.splitlines(), 1):
+        # 三引号原始字符串内部的一切都不该被当代码读（JSON 夹具里全是花括号）
+        if in_raw:
+            end = line.find(TRIPLE)
+            if end < 0:
+                continue
+            line = line[end + len(TRIPLE):]
+            in_raw = False
         # 游离的注释续行：编辑时把新的 ` * ...` 段落接在已经 `*/` 收尾的注释块后面，
         # Kotlin 会报一整串 "Expecting a top level declaration"。这类错在 iosMain 文件上
         # 本机根本编不到（Windows 上 iOS target 被禁用，编译被跳过），只能靠这里挡。
@@ -130,7 +168,14 @@ def scan(text: str):
             if c == "/" and i + 1 < n and line[i + 1] == "/":
                 break
             if c == '"':
-                # 三引号原始字符串里也可能有括号，这里按普通字符串处理足够用
+                if line.startswith(TRIPLE, i):
+                    end = line.find(TRIPLE, i + len(TRIPLE))
+                    if end < 0:
+                        # 开在了这一行、收在后面某一行（JSON 夹具的常见写法）
+                        in_raw = True
+                        break
+                    i = end + len(TRIPLE)
+                    continue
                 i += 1
                 while i < n and line[i] != '"':
                     if line[i] == "\\":
