@@ -580,23 +580,32 @@ git commit -m "feat(update): 判定纯函数，含\"包下不到就不拦\"的�
 - Create: `shared/src/commonMain/kotlin/com/jianyi/outfit/data/update/UpdateLog.kt`（`internal expect fun logUpdateWarning`）
 - Create: `shared/src/androidMain/kotlin/com/jianyi/outfit/data/update/UpdateLog.android.kt`（`Log.w`）
 - Create: `shared/src/iosMain/kotlin/com/jianyi/outfit/data/update/UpdateLog.ios.kt`（`NSLog`）
-- Modify: `shared/src/commonMain/kotlin/com/jianyi/outfit/data/remote/WeatherApiClient.kt`（加 `newHttpClientEngine()`）
 - Test: `shared/src/commonTest/kotlin/com/jianyi/outfit/data/update/UpdateRepositoryTest.kt`
 
-**Interfaces:**
-- Consumes: `UpdateManifestParser`（Task 1）、`decideUpdate`（Task 2，惰探针版签名）
-- Produces: `interface UpdateHttp { suspend fun getText(url: String): String?; suspend fun headOk(url: String): Boolean }`；`class KtorUpdateHttp : UpdateHttp`；`const val UPDATE_MANIFEST_URL: String`；`class UpdateRepository(http: UpdateHttp, manifestUrl: String = UPDATE_MANIFEST_URL, logWarning: (String) -> Unit = ::logUpdateWarning) : UpdateChecker { override suspend fun check(currentVersionCode: Int): UpdateDecision }`；`interface UpdateChecker { suspend fun check(currentVersionCode: Int): UpdateDecision }`
+**Interfaces（Task 3 修复轮后的最终形态，后面所有 Task 以这段为准）:**
+- Consumes: `UpdateManifestParser`（Task 1）、`decideUpdate` + `needsApkProbe`（Task 2）、`httpClientEngine()`（`data/remote`，同模块 internal 直接可见）
+- Produces: `sealed interface ManifestFetch { Body(text) | HttpStatus(code) | NetworkFailed(reason) }`；
+  `interface UpdateHttp { suspend fun fetchManifest(url: String): ManifestFetch; suspend fun headOk(url: String): Boolean }`
+  （**不再有 `getText(url): String?`** —— 把 403/404/5xx 和离线折成同一个 null，正好抹掉了这条功能最怕的那类永久静默失效）；
+  `class KtorUpdateHttp : UpdateHttp`；`const val UPDATE_MANIFEST_URL: String`；
+  `class UpdateRepository(http: UpdateHttp, manifestUrl: String = UPDATE_MANIFEST_URL, logWarning: (String) -> Unit = ::logUpdateWarning) : UpdateChecker`；
+  `interface UpdateChecker { suspend fun check(currentVersionCode: Int): UpdateDecision }`
+  —— `UpdateChecker.check` 的签名**没变**，Task 5 的假实现照旧可用。
+- 报警三态：离线**不报**；非 2xx 报（带状态码与地址）；解析失败报（带地址）；
+  该拦却探包失败也报（带 apkUrl）—— 后者是"作者想拦人而系统决定不拦"的唯一留痕。
 
 - [ ] **Step 1: 写失败的测试（用假 UpdateHttp，不引 MockEngine）**
 
 `shared/src/commonTest/kotlin/com/jianyi/outfit/data/update/UpdateRepositoryTest.kt`：
 
-> **修订（实现期）**：除下列用例外，实际文件另加 4 条 —— `unreadable_body_is_unreachable_and_warns`
-> 与 `http_failure_is_unreachable_and_stays_silent`（钉住 Task 1 那条裁决：只有"读到了但看不懂"才报警，
-> 离线不报警）、`default_manifest_url_is_used_when_not_overridden`、
-> `manifest_url_is_the_gitee_raw_endpoint_not_the_releases_api`（钉住 raw 域，防止换回 UA 依赖的 `/releases/latest`）。
-> 告警通过构造参数 `logWarning` 注入，而不是让 commonTest 直接调 `logUpdateWarning` 的 android actual ——
-> 本模块没配 `unitTests.isReturnDefaultValues`，普通 JVM 上 `android.util.Log` 是抛 `Stub!` 的桩。
+> **本 Task 已实现（提交 `552f5f3`），下面这段是历史文本，与实际文件不一致处以仓库里的实际文件为准。**
+> 实际版本与这段的差异：① 每条调 `check(...)` 的用例都 `= runTest { ... }`（suspend 函数不能直接调）；
+> ② `assertTrue` 是 `(actual, message)` 顺序，不是 app 模块 JUnit 的 `(message, actual)`；
+> ③ `garbage_body_is_unreachable` 扩成 `unreadable_body_is_unreachable_and_warns`（要断言报警真的发出且带地址），
+> 并新增 `http_failure_…_stays_silent`（离线不许报警）；
+> ④ 新增 `optional_verdict_does_not_probe` / `default_manifest_url_is_used_when_not_overridden` /
+> `manifest_url_is_the_gitee_raw_endpoint_not_the_releases_api`；
+> ⑤ 告警通过构造参数 `logWarning` 注入（commonTest 里碰不得 android actual 的 `Log`）。
 
 ```kotlin
 package com.jianyi.outfit.data.update
@@ -684,7 +693,7 @@ Expected: 编译失败（Unresolved reference: UpdateRepository / UpdateHttp）
 ```kotlin
 package com.jianyi.outfit.data.update
 
-import com.jianyi.outfit.data.remote.newHttpClientEngine
+import com.jianyi.outfit.data.remote.httpClientEngine
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.get
@@ -708,7 +717,7 @@ const val UPDATE_MANIFEST_URL =
 
 class KtorUpdateHttp : UpdateHttp {
 
-    private val client = HttpClient(newHttpClientEngine()) {
+    private val client = HttpClient(httpClientEngine()) {
         install(HttpTimeout) {
             connectTimeoutMillis = 8_000
             requestTimeoutMillis = 10_000
@@ -1001,7 +1010,7 @@ class AndroidUpdateGateway(private val context: Context) : AppUpdateGateway {
 
 - [ ] **Step 5: iOS 依赖容器接上**
 
-修改 `shared/src/iosMain/kotlin/com/jianyi/outfit/platform/` 下的 `IosAppDependencies`（入口文件 `MainViewController.kt` 内或其伴生文件），加：
+修改 `shared/src/iosMain/kotlin/com/jianyi/outfit/IosAppDependencies.kt`（**真实路径不在 `platform/` 下，也不在 `MainViewController.kt` 里**；该类在第 46 行 `class IosAppDependencies : AppDependencies`），加：
 
 ```kotlin
     override val appVersion: AppVersion = AppVersion(versionCode = 1, versionName = "0.0.0")
@@ -1020,7 +1029,7 @@ Expected: BUILD SUCCESSFUL；app 51 + shared 27+（新增用例）全过
 - [ ] **Step 7: 提交**
 
 ```bash
-git add shared/src/commonMain/kotlin/com/jianyi/outfit/data/AppDependencies.kt shared/src/iosMain/kotlin/com/jianyi/outfit/platform/ app/src/main/java/com/jianyi/outfit/update/ app/src/main/java/com/jianyi/outfit/di/AppContainer.kt
+git add shared/src/commonMain/kotlin/com/jianyi/outfit/data/AppDependencies.kt shared/src/iosMain/kotlin/com/jianyi/outfit/platform/IosUpdateGateway.kt shared/src/iosMain/kotlin/com/jianyi/outfit/IosAppDependencies.kt app/src/main/java/com/jianyi/outfit/update/ app/src/main/java/com/jianyi/outfit/di/AppContainer.kt
 git commit -m "feat(update): AppUpdateGateway 能力接口，iOS 空实现，版本号由 app 注入"
 ```
 
@@ -1465,8 +1474,16 @@ git commit -m "feat(update): 更新状态机，门禁不可跳过与\"包下不�
 **Files:**
 - Create: `shared/src/commonMain/kotlin/com/jianyi/outfit/ui/update/UpdateGateLayer.kt`
 - Create: `shared/src/commonMain/kotlin/com/jianyi/outfit/ui/update/UpdateCopy.kt`
+- Create: `shared/src/commonMain/kotlin/com/jianyi/outfit/ui/update/UpdateWiring.kt`（两端共享的构造点，防参数顺序漂移）
 - Modify: `shared/src/commonMain/kotlin/com/jianyi/outfit/ui/root/RootScreen.kt:55-61`
+- Modify: `shared/src/commonMain/kotlin/com/jianyi/outfit/data/AppDependencies.kt`（加 `val updateViewModel: UpdateViewModel`）
+- Modify: `app/src/main/java/com/jianyi/outfit/di/AppContainer.kt`（Android 侧构造 VM）
+- Modify: `shared/src/iosMain/kotlin/com/jianyi/outfit/IosAppDependencies.kt`（iOS 侧构造 VM；**路径不在 `platform/` 下**）
 - Test: `shared/src/commonTest/kotlin/com/jianyi/outfit/ui/update/UpdateCopyTest.kt`
+
+> **这三处 Modify 原本没列进 Files，也没进 Step 的 `git add`**（Task 4 期间实测到同一形状的事故）：
+> 症状是本地全绿、提交里少文件，CI 才报 missing override / 未构造 VM；
+> 而 iOS 那一份在本机（Windows）连编都编不了，只能靠远端。**派发时按这份清单，别照旧文本。**
 
 **Interfaces:**
 - Consumes: `UpdateViewModel` / `UpdateUiState`（Task 5）、`GlassSurface` / `GlassShapes` / `GlassEmphasis`（既有玻璃层）
@@ -1928,7 +1945,7 @@ Expected: 全绿，APK 产出
 - [ ] **Step 8: 提交**
 
 ```bash
-git add shared/src/commonMain/kotlin/com/jianyi/outfit/ui/update/ shared/src/commonMain/kotlin/com/jianyi/outfit/ui/root/RootScreen.kt shared/src/commonMain/kotlin/com/jianyi/outfit/data/AppDependencies.kt
+git add shared/src/commonMain/kotlin/com/jianyi/outfit/ui/update/ shared/src/commonMain/kotlin/com/jianyi/outfit/ui/root/RootScreen.kt shared/src/commonMain/kotlin/com/jianyi/outfit/data/AppDependencies.kt app/src/main/java/com/jianyi/outfit/di/AppContainer.kt shared/src/iosMain/kotlin/com/jianyi/outfit/IosAppDependencies.kt
 git commit -m "feat(update): 门禁层挂在 RootScreen 之上，文案与进度格式有测试"
 ```
 
@@ -1941,10 +1958,15 @@ git commit -m "feat(update): 门禁层挂在 RootScreen 之上，文案与进度
 - Test: `shared/src/androidUnitTest/kotlin/com/jianyi/outfit/data/update/ApkDownloaderTest.kt`
 
 **Interfaces:**
-- Consumes: `UpdateManifest`、`ApkInstaller` / `DownloadOutcome` / `DownloadFailure`（Task 5）、`newHttpClientEngine()`（Task 3）
+- Consumes: `UpdateManifest`、`ApkInstaller` / `DownloadOutcome` / `DownloadFailure`（Task 5）、`httpClientEngine()`（Task 3 的 `data/remote/WeatherApiClient.kt`）
+
+> **修订（Task 3 修复轮）**：引擎工厂的真名是 **`httpClientEngine()`**（`internal expect fun`）。
+> 计划里一度写作 `newHttpClientEngine()`，那是我为一个**不存在的限制**加的包装 ——
+> `internal` 是**模块级**可见性，不是包级（Kotlin 没有"包内可见"这一档），
+> 所以 `data.update` 本来就能直接调 `data.remote` 的 internal 声明。别名已删，别再引用它。
 - Produces: `class ApkDownloader(context: Context) : ApkInstaller`；`internal fun sha256Of(file: File): String?`；`internal fun shouldRefuseDownload(total: Long?, free: Long): Boolean`；`fun apkFileNameFor(versionName: String): String`
 
-> **为什么放 `shared/androidMain` 而不是 app 模块**：shared 里 Ktor 是 `implementation()`（见 `shared/build.gradle.kts`），app 的编译类路径上根本没有 `io.ktor.*` —— 放 app 就得给 app 补两条 ktor 依赖，而下载器要用的引擎工厂 `newHttpClientEngine()` 本来就是 shared 的 internal。androidMain 里两者都现成，且 `:shared:testDebugUnitTest` 会自动跑 `androidUnitTest`。
+> **为什么放 `shared/androidMain` 而不是 app 模块**：shared 里 Ktor 是 `implementation()`（见 `shared/build.gradle.kts`），app 的编译类路径上根本没有 `io.ktor.*` —— 放 app 就得给 app 补两条 ktor 依赖，而下载器要用的引擎工厂 `httpClientEngine()` 本来就是 shared 模块内的 internal 声明。androidMain 里两者都现成，且 `:shared:testDebugUnitTest` 会自动跑 `androidUnitTest`。
 
 - [ ] **Step 1: 写失败的测试（只测纯部分：哈希、空间判定、文件名）**
 
@@ -2017,7 +2039,7 @@ Expected: 编译失败（Unresolved reference: sha256Of）
 package com.jianyi.outfit.data.update
 
 import android.content.Context
-import com.jianyi.outfit.data.remote.newHttpClientEngine
+import com.jianyi.outfit.data.remote.httpClientEngine
 import com.jianyi.outfit.ui.update.ApkInstaller
 import com.jianyi.outfit.ui.update.DownloadFailure
 import com.jianyi.outfit.ui.update.DownloadOutcome
@@ -2043,7 +2065,7 @@ fun shouldRefuseDownload(total: Long?, free: Long): Boolean =
 
 class ApkDownloader(private val context: Context) : ApkInstaller {
 
-    private val client = HttpClient(newHttpClientEngine()) {
+    private val client = HttpClient(httpClientEngine()) {
         install(HttpTimeout) {
             connectTimeoutMillis = 10_000
             // 24MB 的包：只限连接与单次读，不设总请求超时，否则慢网必被掐断
@@ -2620,12 +2642,38 @@ jobs:
 4. **手动兜底全流程**：Gitee 网页 → 发行版 → 新建 → tag 填 `v2.2.0` → 上传 `app-release.apk` → 把 CI 日志里的 sha256 补进 `update.json` 并提交；
 5. 什么时候该抬 `minSupportedVersionCode`（缓存格式变更、接口凭证语义变更等会让旧版读到错数据的改动），以及抬错会拦掉所有人这件事。
 
-- [ ] **Step 3: 语法校验**
+- [ ] **Step 3: 首个真 Release 出来后，实测探包正例（这一步不做完，功能等于没上线）**
+
+`headOk` 判的是"HEAD 跟完重定向落在 2xx"。今天实测过的是**负例**与 raw 域正例：
+
+```
+curl -I https://gitee.com/wuliao11541/WeatherOutfit/releases/download/v2.1.2/jianyi-2.1.2.apk  → 404
+curl -I https://gitee.com/wuliao11541/WeatherOutfit/raw/main/README.md → 200（跟到 raw.giteeusercontent.com）
+curl -r 0-99 同一 raw 地址 → 206（支持 Range）
+```
+
+**没有实测过的是"存在附件的 Release 下载 URL 对 HEAD 答不答 2xx"** —— 那条地址是
+三跳（`releases/download/<tag>/<file>` → `attach_files/<id>/download/<file>` → `foruda.gitee.com/…?token=&ts=`），
+而 foruda 已知**忽略 Range**、签名约 15 分钟过期后返 401。如果它对 HEAD 返 403/405，
+那么 `headOk` 恒 false ⇒ `Forced` 永远不会出现，门禁静默失效（方向是安全的，但功能是死的）。
+
+Run（把 tag 换成本次真发布的）：
+```
+curl -sSI -o /dev/null -w 'HTTP=%{http_code} FINAL=%{url_effective}\n' -L \
+  "https://gitee.com/wuliao11541/WeatherOutfit/releases/download/v2.2.0/jianyi-2.2.0.apk"
+```
+Expected: `HTTP=200`。
+- 若是 403/405：把 `UpdateHttp.headOk` 换成"带 `Range: bytes=0-0` 的 GET，接受 200/206"，
+  并同步改 `KtorUpdateHttp` 与那条 `probe_url_is_the_manifest_apk_url` 用例；
+- 若是 404：说明附件路径形状不是这个，按 `attach_files` 那跳的真实地址改 `apkUrl` 的构造。
+  **两种都必须在同一轮里改完再进 Task 11**，否则强更形同不存在。
+
+- [ ] **Step 4: 语法校验**
 
 Run: `py -c "import yaml;d=yaml.safe_load(open('.github/workflows/release.yml',encoding='utf-8'));print(list(d['jobs']));print(len(d['jobs']['publish']['steps']),'steps')"`
 Expected: `['publish']` 与步骤数
 
-- [ ] **Step 4: 提交**
+- [ ] **Step 5: 提交**
 
 ```bash
 git add .github/workflows/release.yml README.md
@@ -2646,7 +2694,19 @@ git commit -m "ci(release): tag 触发签名构建并发布到 Gitee Release，�
 Run: `./gradlew :app:testDebugUnitTest --tests "*UpdateManifestFileTest*"`
 Expected: 通过（`apkUrl` 的 tag 段与 `versionName` 一致）
 
-> `UpdateManifestFileTest` 在 Task 1 就已经建好：从测试工作目录向上找到含 `settings.gradle.kts` 的根，读 `update.json`，断言必填齐全、`sha256` 若声明则 64 位十六进制、`apkUrl` 含 `/download/v<versionName>/` 且以 `.apk` 结尾。**这条就是"改了版本号忘了改清单"的那把锁：它在这里变红就改清单，不要改测试。**
+> `UpdateManifestFileTest` 在 Task 1 就已经建好（`app/src/test/java/com/jianyi/outfit/UpdateManifestFileTest.kt`，
+> 现在**只有这 4 条**，别按更早的描述去找 sha256 断言）：从测试工作目录向上找到含 `settings.gradle.kts` 的仓库根，
+> 读真实的 `update.json`，逐条钉住
+> ①`declared_version_code_matches_build_config`、②`declared_version_name_matches_build_config`
+> （这两条就是"改了版本号忘了改清单"的锁：**它变红就改清单，不要改测试**）、
+> ③`apk_url_tag_matches_version_name`（tag 段必须跟 `versionName` 走，否则 HEAD 探包永远探一个不存在的附件）、
+> ④`min_supported_code_is_not_above_declared_version_code`（`decideUpdate` 会用 `minOf` 把这个笔误静默吸收，
+> 别处全都看不出来，只有这条读真文件的用例能抓到）。
+>
+> 它**不覆盖**的事别再以为覆盖了：不校验 https / `.apk` 后缀 / sha256 长度 —— 那些是
+> `UpdateManifestParser.isSane()` 在运行时的语义闸，不是这条仓库测试的职责。
+> 另外 `update.json` 已登记成该测试任务的输入（`app/build.gradle.kts` 里 `inputs.file(...)`），
+> 所以它不会因为 UP-TO-DATE/FROM-CACHE 而拿着旧清单变绿。
 
 - [ ] **Step 2: 本地全量（等价 CI）**
 

@@ -6,7 +6,7 @@ package com.jianyi.outfit.data.update
  * 两处各比一次就有一处会漏掉"包下不到就不拦"那条降级。
  */
 enum class UpdateVerdict {
-    /** 拿不到 / 看不懂清单，或包下不到 —— 什么都不显示，照常使用 */
+    /** 拿不到 / 看不懂清单 —— 什么都不显示，照常使用 */
     Unreachable,
 
     /** 已经是最新（或更新） */
@@ -40,8 +40,11 @@ private fun UpdateManifest.effectiveMinSupportedCode(): Int = minOf(minSupported
  *
  * 正确性由 `UpdateDecisionTest.probe_is_needed_exactly_when_the_verdict_depends_on_it`
  * 穷举 (latest, min, current) 全部组合钉住：**当且仅当**探针结论会改变 verdict 时才发探针。
+ *
+ * `internal` 而不是 public：唯一的消费者是同模块的 [UpdateRepository]，
+ * UI/ViewModel/设置页都不该需要它 —— 把它放到 API 表面就等于亲手留下"第二处判定"的入口。
  */
-fun needsApkProbe(manifest: UpdateManifest, currentVersionCode: Int): Boolean =
+internal fun needsApkProbe(manifest: UpdateManifest, currentVersionCode: Int): Boolean =
     currentVersionCode < manifest.effectiveMinSupportedCode()
 
 /**

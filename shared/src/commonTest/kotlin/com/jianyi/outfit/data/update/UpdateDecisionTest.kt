@@ -61,7 +61,13 @@ class UpdateDecisionTest {
         assertEquals(UpdateVerdict.UpToDate, decideUpdate(manifest(9, 12), 9, true).verdict)
     }
 
-    /** 判定必须是无副作用的纯函数：同一组输入两次结果一致，且不改动入参 */
+    /**
+     * 同一组输入两次结果一致。
+     *
+     * 说清这条**能**证明什么、不能证明什么：它只抓非确定性（读到全局状态、缓存了上一次的探针结论等）。
+     * "不改动入参"不是它背书的 —— `UpdateManifest` 是 data class、全 `val`，
+     * 不可变性由类型保证，不需要用例来保证。别把这条当成纯度证明来读。
+     */
     @Test fun decide_is_pure() {
         val m = manifest(9, 9)
         assertEquals(decideUpdate(m, 8, true), decideUpdate(m, 8, true))
