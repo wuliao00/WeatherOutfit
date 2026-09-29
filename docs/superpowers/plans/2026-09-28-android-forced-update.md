@@ -23,6 +23,18 @@
 - 设备前台若属于别的运行中会话（`com.studykit`、`com.wuliao00.genglingng` 等），立刻停手，把设备侧结论标为未验证。
 - 清单解析必须**严格**：不允许 `coerceInputValues` / `isLenient`（理由见 Task 1）。
 - 门禁的硬前提：`apkUrl` HEAD 探包成功（2xx）才允许 `Forced`；清单无效/拉取失败/探包失败一律不拦。
+- **版本号比较只许出现在 `UpdateDecision.kt` 一个文件里**（`decideUpdate` 与 `needsApkProbe` 共用
+  `effectiveMinSupportedCode()`）。任何 Task 都不许在 UI/VM/仓库里再写一次 `>= versionCode` ——
+  两处漂移的症状是"该探时没探 ⇒ Forced 静默变 Optional"，零日志零红测。
+- 测试写法两条硬约定（Task 3 实测踩过）：
+  1. 调 suspend 函数（`UpdateChecker.check`、`ApkDownloader.download`、任何 VM 方法）的用例必须
+     `@Test fun xxx() = runTest { … }`；commonTest 已声明 `kotlinx.coroutines.test`，既有写法参照
+     `SettingsRepositoryTest`。直接调用会得到 `should be called only from a coroutine`。
+  2. `kotlin.test` 的断言顺序是 **assertTrue(actual, message)**，而 app 模块用 JUnit 的
+     `org.junit.Assert.assertTrue(message, condition)` —— 两边互相抄会得
+     "None of the following candidates is applicable"。
+- commonTest 里不许直接触碰平台 actual 的副作用（`android.util.Log` 在无 Robolectric、
+  未配 `isReturnDefaultValues` 的普通 JVM 上是抛 `Stub!` 的桩）；需要观测就注入回调。
 
 ---
 
@@ -491,9 +503,20 @@ enum class UpdateVerdict {
 data class UpdateDecision(val verdict: UpdateVerdict, val manifest: UpdateManifest?)
 
 /**
+ * 生效的最低可用版本：作者把 min 写成比 latest 还大时钳到 latest。
+ * 这个表达式只能有一份 —— `decideUpdate` 与 `needsApkProbe` 都读它。
+ */
+private fun UpdateManifest.effectiveMinSupportedCode(): Int = minOf(minSupportedCode, versionCode)
+
+/** 要不要为这份清单发那次 HEAD（挂起侧专用，见下方修订说明） */
+fun needsApkProbe(manifest: UpdateManifest, currentVersionCode: Int): Boolean =
+    currentVersionCode < manifest.effectiveMinSupportedCode()
+
+/**
  * @param manifest 解析成功的清单；null 表示读不到或看不懂
  * @param currentVersionCode 装机包的 versionCode，由 app 侧注入（commonMain 不许碰 BuildConfig）
- * @param apkReachable 对 manifest.apkUrl 发 HEAD、跟完重定向后是否 2xx
+ * @param apkReachable 对 manifest.apkUrl 发 HEAD、跟完重定向后是否 2xx；
+ *   传之前先问 needsApkProbe
  */
 fun decideUpdate(
     manifest: UpdateManifest?,
@@ -506,7 +529,7 @@ fun decideUpdate(
     }
     // 写错的 minSupported（比 latest 还大）钳到 latest：
     // 不钳的话它会拦掉所有人，包括已经装了最新版的人。
-    val minSupported = minOf(latest.minSupportedCode, latest.versionCode)
+    val minSupported = latest.effectiveMinSupportedCode()
     val verdict =
         if (currentVersionCode >= minSupported) UpdateVerdict.Optional
         else if (apkReachable) UpdateVerdict.Forced
@@ -514,6 +537,26 @@ fun decideUpdate(
     return UpdateDecision(verdict, latest)
 }
 ```
+
+> **修订（Task 3 期间）**：第三个参数**保持** `apkReachable: Boolean`，但新增
+> `fun needsApkProbe(manifest: UpdateManifest, currentVersionCode: Int): Boolean`，
+> 与 `decideUpdate` 共用同一私有扩展 `effectiveMinSupportedCode()`（= `minOf(minSupportedCode, versionCode)`）。
+>
+> 起因：仓库层原来按计划自己抄了一遍 `currentVersionCode >= manifest.versionCode` 来"跳过探包"，
+> 于是同一个判定语义散在两个文件 —— 任一处漂移的后果是"判定层想拦而探针没跑"，
+> 门禁静默退化成 Optional，且与 `UpdateDecision.kt` 自称的"只有这一个函数决定拦不拦人"矛盾。
+> 第一版修法是把参数改成惰性的 `probeApk: () -> Boolean`，**编译器直接拒绝**：
+> `headOk` 是挂起函数，非挂起的函数类型里调它会得到
+> `Suspension functions can only be called within coroutine body`；
+> 把类型改成 `suspend () -> Boolean` 又必须把 `decideUpdate` 变成挂起函数。协程测试支持其实**已经有了**
+> （commonTest 已声明 `kotlinx.coroutines.test`，既有 `SettingsRepositoryTest` 就是 `= runTest {}`），
+> 所以那不是阻碍；否决它的真实理由是：只有纯值函数才配得上表驱动穷举，
+> 挂起版一条条 `runTest` 会把最强那条锁换成最弱那条。
+>
+> 最终形态：纯函数不变，谓词单独导出给挂起侧用，阈值只有一份。
+> 正确性不靠"读代码觉得显然"，由 `UpdateDecisionTest.probe_is_needed_exactly_when_the_verdict_depends_on_it`
+> 穷举 `latest 1..10 × min 1..10 × current 0..11`，断言
+> **"当且仅当 `apkReachable` 真值会改变 verdict"⇔"needsApkProbe 为 true"**。
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -534,15 +577,26 @@ git commit -m "feat(update): 判定纯函数，含\"包下不到就不拦\"的�
 **Files:**
 - Create: `shared/src/commonMain/kotlin/com/jianyi/outfit/data/update/UpdateHttp.kt`
 - Create: `shared/src/commonMain/kotlin/com/jianyi/outfit/data/update/UpdateRepository.kt`
+- Create: `shared/src/commonMain/kotlin/com/jianyi/outfit/data/update/UpdateLog.kt`（`internal expect fun logUpdateWarning`）
+- Create: `shared/src/androidMain/kotlin/com/jianyi/outfit/data/update/UpdateLog.android.kt`（`Log.w`）
+- Create: `shared/src/iosMain/kotlin/com/jianyi/outfit/data/update/UpdateLog.ios.kt`（`NSLog`）
+- Modify: `shared/src/commonMain/kotlin/com/jianyi/outfit/data/remote/WeatherApiClient.kt`（加 `newHttpClientEngine()`）
 - Test: `shared/src/commonTest/kotlin/com/jianyi/outfit/data/update/UpdateRepositoryTest.kt`
 
 **Interfaces:**
-- Consumes: `UpdateManifestParser`（Task 1）、`decideUpdate`（Task 2）
-- Produces: `interface UpdateHttp { suspend fun getText(url: String): String?; suspend fun headOk(url: String): Boolean }`；`class KtorUpdateHttp : UpdateHttp`；`const val UPDATE_MANIFEST_URL: String`；`class UpdateRepository(http: UpdateHttp, manifestUrl: String = UPDATE_MANIFEST_URL) : UpdateChecker { override suspend fun check(currentVersionCode: Int): UpdateDecision }`；`interface UpdateChecker { suspend fun check(currentVersionCode: Int): UpdateDecision }`
+- Consumes: `UpdateManifestParser`（Task 1）、`decideUpdate`（Task 2，惰探针版签名）
+- Produces: `interface UpdateHttp { suspend fun getText(url: String): String?; suspend fun headOk(url: String): Boolean }`；`class KtorUpdateHttp : UpdateHttp`；`const val UPDATE_MANIFEST_URL: String`；`class UpdateRepository(http: UpdateHttp, manifestUrl: String = UPDATE_MANIFEST_URL, logWarning: (String) -> Unit = ::logUpdateWarning) : UpdateChecker { override suspend fun check(currentVersionCode: Int): UpdateDecision }`；`interface UpdateChecker { suspend fun check(currentVersionCode: Int): UpdateDecision }`
 
 - [ ] **Step 1: 写失败的测试（用假 UpdateHttp，不引 MockEngine）**
 
 `shared/src/commonTest/kotlin/com/jianyi/outfit/data/update/UpdateRepositoryTest.kt`：
+
+> **修订（实现期）**：除下列用例外，实际文件另加 4 条 —— `unreadable_body_is_unreachable_and_warns`
+> 与 `http_failure_is_unreachable_and_stays_silent`（钉住 Task 1 那条裁决：只有"读到了但看不懂"才报警，
+> 离线不报警）、`default_manifest_url_is_used_when_not_overridden`、
+> `manifest_url_is_the_gitee_raw_endpoint_not_the_releases_api`（钉住 raw 域，防止换回 UA 依赖的 `/releases/latest`）。
+> 告警通过构造参数 `logWarning` 注入，而不是让 commonTest 直接调 `logUpdateWarning` 的 android actual ——
+> 本模块没配 `unitTests.isReturnDefaultValues`，普通 JVM 上 `android.util.Log` 是抛 `Stub!` 的桩。
 
 ```kotlin
 package com.jianyi.outfit.data.update
@@ -706,33 +760,95 @@ interface UpdateChecker {
 /**
  * 把"读清单 → 判要不要提示 → 确认包真能下"串成一次调用。
  *
- * 顺序是有意的：**先探包再判 Forced**，且清单都没读到时绝不发 HEAD。
- * 反过来（先判 Forced 再探包）会让 UI 在探包期间空屏 —— 门禁卡片要么带着
- * "正在确认"的第三种状态出现，要么就得先拦人再发现下不到，两种都比现在这样差。
+ * 三个次序都是刻意的：
+ * 1. 清单读不到（离线、404）直接 Unreachable 且**不发 HEAD** —— 没有 apkUrl 可探，探了是浪费；
+ * 2. 正文到了但解析失败 ⇒ 报一条 warning。这是唯一的观测通道：清单里一个拼错会让
+ *    `parse()` 返回 null，于是"永远没有人收到更新"，而测试、CI、UI 全绿（Task 1 裁决）；
+ * 3. **版本比较只写在 `decideUpdate` / `needsApkProbe` 里** —— 本类一度自己抄了一遍 `>=`
+ *    来省掉探包，于是同一个决定"拦不拦人"的比较存在于两个文件；两处一旦漂移，
+ *    结果就是判定层想拦而探针没跑，门禁静默退化成 Optional，正是整个功能最防的那件事。
+ *    这里只问谓词，不出现任何阈值。
  */
 class UpdateRepository(
     private val http: UpdateHttp,
-    private val manifestUrl: String = UPDATE_MANIFEST_URL
+    private val manifestUrl: String = UPDATE_MANIFEST_URL,
+    private val logWarning: (String) -> Unit = ::logUpdateWarning
 ) : UpdateChecker {
 
     override suspend fun check(currentVersionCode: Int): UpdateDecision {
-        val manifest = UpdateManifestParser.parse(http.getText(manifestUrl))
-            ?: return UpdateDecision(UpdateVerdict.Unreachable, null)
+        val body = http.getText(manifestUrl)
+        if (body == null) return UpdateDecision(UpdateVerdict.Unreachable, null)
 
-        if (currentVersionCode >= manifest.versionCode) {
-            return UpdateDecision(UpdateVerdict.UpToDate, manifest)
+        val manifest = UpdateManifestParser.parse(body)
+        if (manifest == null) {
+            logWarning(
+                "更新清单读到了但解析失败：$manifestUrl ⇒ 对所有版本判 Unreachable，" +
+                    "也就是没有人会收到更新。检查 versionCode / minSupportedVersionCode / apkUrl " +
+                    "是否齐全，以及 apkUrl 是否 https 且以 .apk 结尾"
+            )
+            return UpdateDecision(UpdateVerdict.Unreachable, null)
         }
-        return decideUpdate(manifest, currentVersionCode, http.headOk(manifest.apkUrl))
+        // 只有 verdict 真的依赖探针结论时才发这次 HEAD；谓词与判定共用同一阈值，
+        // 所以"少发一次请求"和"不会漏发"不可能互相矛盾。
+        val reachable =
+            if (needsApkProbe(manifest, currentVersionCode)) http.headOk(manifest.apkUrl) else false
+        return decideUpdate(manifest, currentVersionCode, reachable)
     }
+}
+```
+
+`shared/src/commonMain/kotlin/com/jianyi/outfit/data/update/UpdateLog.kt`：
+
+```kotlin
+package com.jianyi.outfit.data.update
+
+/**
+ * 清单故障的观测通道。commonMain 不许引 `android.util.Log`，也不能 `println`
+ * （iOS 侧 println 不进系统日志，等于没有）。
+ *
+ * 只在"读到了但看不懂"时用；离线是正常态，不该产日志。
+ */
+internal expect fun logUpdateWarning(message: String)
+```
+
+`shared/src/androidMain/kotlin/com/jianyi/outfit/data/update/UpdateLog.android.kt`：
+
+```kotlin
+package com.jianyi.outfit.data.update
+
+import android.util.Log
+
+/**
+ * `adb logcat -s JianyiUpdate` 是这条故障在真机上唯一的可见方式。
+ * tag 独立成一个，方便从满屏日志里捞出来。
+ */
+internal actual fun logUpdateWarning(message: String) {
+    Log.w("JianyiUpdate", message)
+}
+```
+
+`shared/src/iosMain/kotlin/com/jianyi/outfit/data/update/UpdateLog.ios.kt`：
+
+```kotlin
+package com.jianyi.outfit.data.update
+
+import platform.Foundation.NSLog
+
+/**
+ * 用 `%@` 而不是把 message 直接当格式串：清单地址/正文片段里出现 `%` 时，
+ * 裸串会被 NSLog 当格式说明符解析而打错。
+ */
+internal actual fun logUpdateWarning(message: String) {
+    NSLog("JianyiUpdate: %@", message)
 }
 ```
 
 - [ ] **Step 6: 跑 lint 与测试**
 
-Run: `py tools/kotlin_lint.py shared/src/commonMain/kotlin/com/jianyi/outfit/data/update/UpdateHttp.kt shared/src/commonMain/kotlin/com/jianyi/outfit/data/update/UpdateRepository.kt shared/src/commonMain/kotlin/com/jianyi/outfit/data/remote/WeatherApiClient.kt`
-Expected: `0 problem(s)`
-Run: `./gradlew :shared:testDebugUnitTest --tests "*UpdateRepositoryTest*"`
-Expected: BUILD SUCCESSFUL，6 条 0 失败
+Run: `py tools/kotlin_lint.py shared/src/commonMain/kotlin/com/jianyi/outfit/data/update/UpdateHttp.kt shared/src/commonMain/kotlin/com/jianyi/outfit/data/update/UpdateRepository.kt shared/src/commonMain/kotlin/com/jianyi/outfit/data/update/UpdateLog.kt shared/src/commonMain/kotlin/com/jianyi/outfit/data/remote/WeatherApiClient.kt`
+Expected: `0 problem(s)`（`android.util.Log` 与 `platform.Foundation` 都在 actual 侧，lint 只禁 commonMain）
+Run: `./gradlew :shared:testDebugUnitTest --tests "*UpdateRepositoryTest*" --tests "*UpdateDecisionTest*"`
+Expected: BUILD SUCCESSFUL，11 + 9 条 0 失败
 
 - [ ] **Step 7: 提交**
 
@@ -748,6 +864,7 @@ git commit -m "feat(update): 清单拉取与探包接缝，判定逻辑可在 JV
 **Files:**
 - Modify: `shared/src/commonMain/kotlin/com/jianyi/outfit/data/AppDependencies.kt`
 - Create: `shared/src/iosMain/kotlin/com/jianyi/outfit/platform/IosUpdateGateway.kt`
+- Modify: `shared/src/iosMain/kotlin/com/jianyi/outfit/IosAppDependencies.kt`（**不在 platform/ 下**，实现 `AppDependencies` 的 iOS 容器就这一个文件，第 46 行）
 - Create: `app/src/main/java/com/jianyi/outfit/update/AndroidUpdateGateway.kt`（本 Task 只建骨架，Task 8 填实现）
 - Modify: `app/src/main/java/com/jianyi/outfit/di/AppContainer.kt`
 
@@ -841,7 +958,6 @@ class IosUpdateGateway : AppUpdateGateway {
 package com.jianyi.outfit.update
 
 import android.content.Context
-import android.os.Build
 import com.jianyi.outfit.data.AppUpdateGateway
 import com.jianyi.outfit.data.InstallResult
 
@@ -854,10 +970,12 @@ class AndroidUpdateGateway(private val context: Context) : AppUpdateGateway {
 
     override val supported: Boolean = true
 
-    /** Android 8 以下没有"安装未知应用"这个概念，装了就能装 */
+    /**
+     * 本包 minSdk=26，而"安装未知应用"这套权限正是 26(O) 引入的 ——
+     * 所以 `SDK_INT < O` 那种兼容分支在这里恒为 false，是不可能执行到的死码，不写。
+     */
     override fun hasInstallPermission(): Boolean =
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
-            context.packageManager.canRequestPackageInstalls()
+        context.packageManager.canRequestPackageInstalls()
 
     override fun requestInstallPermission() = Unit
 
@@ -1087,10 +1205,25 @@ class UpdateViewModelTest {
         assertIs<UpdateUiState.Hidden>(vm.state.value)
     }
 
-    /** 权限没给：回到可跳过的卡片 + 去系统设置，而不是白下一次再报错 */
-    @Test fun permission_missing_routes_to_settings_and_keeps_card() = runTest {
+    /**
+     * 权限没给：仍然算门禁，不能退成可跳过卡片。
+     *
+     * 修订（Task 3 之后）：原计划这里断言 `OptionalCard`，那等于
+     * **"只要我不授权，强更就自动降级成可跳过"** —— 门禁被它要防的那个动作（拒绝授权）绕过。
+     * 授权回来后卡片还在，是因为门禁一直挂着，不是因为退了一步。
+     */
+    @Test fun permission_missing_keeps_the_gate_and_opens_settings() = runTest {
         val gateway = FakeGateway(installResult = InstallResult.PermissionMissing)
         val vm = checkedVm(this, UpdateVerdict.Forced, gateway = gateway)
+        vm.startDownload(); runCurrent()
+        assertIs<UpdateUiState.Gate>(vm.state.value)
+        assertEquals(1, gateway.permissionRequests)
+    }
+
+    /** 非强制那一档才可以退成可跳过卡片：它本来就可跳过，退回去能让用户一键继续 */
+    @Test fun permission_missing_downgrades_only_a_non_forced_card() = runTest {
+        val gateway = FakeGateway(installResult = InstallResult.PermissionMissing)
+        val vm = checkedVm(this, UpdateVerdict.Optional, gateway = gateway)
         vm.startDownload(); runCurrent()
         assertIs<UpdateUiState.OptionalCard>(vm.state.value)
         assertEquals(1, gateway.permissionRequests)
@@ -1126,12 +1259,32 @@ class UpdateViewModelTest {
         assertEquals(2, checker.calls)
     }
 
-    /** 关掉可跳过卡片后，同一冷启动内重复 checkOnce 不该再弹 */
-    @Test fun dismissed_optional_stays_dismissed() = runTest {
+    /**
+     * 关掉可跳过卡片后，同一冷启动内重复 checkOnce 不该再弹。
+     *
+     * 修订（Task 3 之后）：原写法是 `vm.forceCheck()` 然后断言 Hidden —— 那是自相矛盾，
+     * `forceCheck()` 按实现就会复位 `optionalDismissed`，卡片必然重新出现，这条用例永远红。
+     * 拆成两条把两个意图分别钉住（见下一条）。
+     */
+    @Test fun dismissed_optional_stays_dismissed_within_the_same_launch() = runTest {
         val vm = checkedVm(this, UpdateVerdict.Optional)
         vm.dismissOptional()
-        vm.forceCheck(); runCurrent()
+        vm.checkOnce(); runCurrent()
         assertIs<UpdateUiState.Hidden>(vm.state.value)
+    }
+
+    /**
+     * 手动「检查更新」是用户的第二个意图，它必须能重新弹出刚被关掉的卡片。
+     *
+     * 不复位 `optionalDismissed` 才是真正的缺陷形状：用户点掉卡片之后，
+     * 设置页里那个按钮按多少次都毫无反应，而且看起来"已经检查过了"。
+     */
+    @Test fun force_check_reshows_a_dismissed_optional() = runTest {
+        val vm = checkedVm(this, UpdateVerdict.Optional)
+        vm.dismissOptional()
+        assertIs<UpdateUiState.Hidden>(vm.state.value)
+        vm.forceCheck(); runCurrent()
+        assertIs<UpdateUiState.OptionalCard>(vm.state.value)
     }
 }
 ```
@@ -1263,10 +1416,12 @@ class UpdateViewModel(
         when (gateway.install(path)) {
             // 装完了必须回到 Hidden：门禁卡片继续挂着就是"装完了还拦着"
             com.jianyi.outfit.data.InstallResult.Launched -> _state.value = UpdateUiState.Hidden
-            // 用户没给"安装未知应用"权限：跳系统设置页，并退回可跳过的卡片，
-            // 让他回来之后还能一键继续，而不是白下一次
+            // 用户没给"安装未知应用"权限：跳系统设置页。
+            // **门禁不许退成可跳过卡片** —— 那等于"只要拒绝授权，强更就自动变成可跳过"，
+            // 门禁被它要防的动作本身绕过。非强制那一档才退回去，让他回来还能一键继续。
             com.jianyi.outfit.data.InstallResult.PermissionMissing -> {
-                _state.value = UpdateUiState.OptionalCard(manifest)
+                _state.value = if (forcedThisLaunch) UpdateUiState.Gate(manifest)
+                               else UpdateUiState.OptionalCard(manifest)
                 gateway.requestInstallPermission()
             }
             com.jianyi.outfit.data.InstallResult.Failed ->
@@ -1463,6 +1618,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -1487,8 +1643,19 @@ import com.jianyi.outfit.ui.glass.GlassSurface
 fun UpdateGateLayer(vm: UpdateViewModel) {
     val state by vm.state.collectAsState()
     val deps = LocalAppDependencies.current
-    val clipboard = androidx.compose.ui.platform.LocalClipboard.current
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val dark = androidx.compose.foundation.isSystemInDarkTheme()
+
+    /**
+     * 冷启动检查由这里发起，而不是容器构造时或 Application 里。
+     *
+     * 修订（Task 3 之后）：全计划原本没有任何一处调用 `checkOnce()` ——
+     * VM 造好、接缝都接上、测试全绿，真机上门禁**永远不出现**，
+     * 因为唯一会触发它的东西是设置页那个手动按钮。挂在这一层是因为这一层
+     * 恰好只在 RootScreen 挂载时存在一次，天然就是"每次冷启动一次"的作用域；
+     * `checkOnce` 自身幂等（`checkedThisLaunch`），重组不会重复打网络。
+     */
+    LaunchedEffect(Unit) { vm.checkOnce() }
 
     val manifest = when (state) {
         is UpdateUiState.OptionalCard -> (state as UpdateUiState.OptionalCard).manifest
@@ -1556,16 +1723,16 @@ fun UpdateGateLayer(vm: UpdateViewModel) {
 
                 Spacer(Modifier.height(4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    GlassButton(
-                        text = if (state is UpdateUiState.Failed) "重试" else "立即更新",
+                    GlassPill(
+                        label = if (state is UpdateUiState.Failed) "重试" else "立即更新",
                         onClick = { vm.startDownload() }
                     )
                     if (!forced) {
-                        GlassButton(text = "以后再说", onClick = { vm.dismissOptional() })
+                        GlassPill(label = "以后再说", onClick = { vm.dismissOptional() })
                     } else if (state is UpdateUiState.Failed) {
                         // 门禁 + 下载失败：给最后一道出口，否则用户真的没有第二条路
-                        GlassButton(
-                            text = "复制下载链接",
+                        GlassPill(
+                            label = "复制下载链接",
                             onClick = {
                                 vm.apkUrl()?.let { url ->
                                     // CMP 1.8 的 Clipboard.setText 是 suspend，必须起协程；
@@ -1608,7 +1775,20 @@ private fun DownloadingBody(done: Long?, total: Long?) {
 
 - [ ] **Step 5b: 补齐玻璃按钮、协程作用域与剪贴板**
 
-在同文件底部加玻璃按钮（**先 grep 仓库有没有现成的**：`grep -rn "fun GlassButton" shared/src` 与 `grep -rn "fun GlassTextButton" shared/src`；有就复用，别造第二个）：
+- [ ] **Step 5b: 补齐玻璃按钮、协程作用域与剪贴板**
+
+> **本步下方那段 `private fun GlassButton` 代码已作废（Task 3 之后核实）**：仓库里已有
+> `GlassPill`，Step 5 的三处按钮已改成直接调它。本 Task 只需要做两件事 ——
+> ①`UpdateGateLayer` 开头加 `val uiScope = rememberCoroutineScope()`；
+> ②按下面的 import 清单补齐（**注意 `LocalClipboard` 在 CMP 1.8 已废弃，用
+> `androidx.compose.ui.platform.LocalClipboardManager`，它的 `setText(AnnotatedString)` 是 suspend**）。
+> 不要照抄下面这段玻璃按钮，也不要为它新增 `GlassShapes.pill`。
+
+在同文件底部加玻璃按钮（**已核实：仓库里没有 `GlassButton` / `GlassTextButton`，但有现成的
+`GlassPill(label: String, modifier, dark, contentColor, shape = GlassShapes.chip, onClick: (() -> Unit)?)`
+—— 见 `shared/src/commonMain/kotlin/com/jianyi/outfit/ui/glass/Glass.kt:517`，它就是这颗胶囊按钮，
+直接复用，本 Task 不许再写第二个私有 `GlassButton`，也不许新增形状常量：
+`GlassShapes` 只有 `card/inner/chip/bar/sheet/circle`，**没有 `pill`**）：
 
 ```kotlin
 /**

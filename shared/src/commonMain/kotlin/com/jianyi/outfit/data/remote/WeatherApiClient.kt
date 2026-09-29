@@ -33,6 +33,15 @@ internal val weatherJson: Json = Json {
 internal expect fun httpClientEngine(): HttpClientEngine
 
 /**
+ * 给同模块其它网络使用者（更新清单、APK 下载）复用的引擎工厂。
+ *
+ * 存在的唯一理由是 `internal` 出不了 `data.remote` 这个包 ——
+ * 而各平台引擎的选择必须是全模块一个决定：清单拉取如果不小心用了别的引擎，
+ * iOS 侧就等于在 App Store 的审核口径上用了非系统网络栈。
+ */
+internal fun newHttpClientEngine(): HttpClientEngine = httpClientEngine()
+
+/**
  * 天气接口客户端。取代原来的 Retrofit `WeatherApiService`。
  *
  * 方法签名刻意与旧的 Retrofit 接口逐一对应（同名、同参数、同返回类型），
