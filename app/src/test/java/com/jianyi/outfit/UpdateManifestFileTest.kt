@@ -72,13 +72,18 @@ class UpdateManifestFileTest {
      * 原来这里是一堆 `versionCode > 0` / `startsWith("https://")` / `endsWith(".apk")`，
      * 已删（理由见类注释）。留下的这条是 `isSane()` **不管**、而手写文件真会写错的：
      * min 高于 latest。解析器刻意不钳制（`UpdateManifestTest.min_above_latest_still_parses`
-     * 钉的就是"原样透出"），所以 min=12、versionCode=9 这种笔误能一路走到判定层，
-     * 变成"所有人都被硬拦"。
+     * 钉的就是“原样透出”），而判定层会钳（`UpdateDecision` 里那行 `minOf(minSupportedCode, versionCode)`）
+     * —— 于是 min=12、versionCode=9 这种笔误在运行时**被静默吸收**：effective min 变成 9，
+     * 表现只是门禁比作者想要的更严（退化成“只允许最新版”），不抛、不降级、不打日志，
+     * 装了最新版的人连“被拦”都不会发生，所以别处永远看不见它。
+     * 结论反过来说才是这条用例存在的理由：**正因为钳位把笔误在每一处都吸收了，
+     * 这份读真文件的测试就是唯一还能抓到它的地方。**
      */
     @Test fun min_supported_code_is_not_above_declared_version_code() {
         assertTrue(
             "minSupportedVersionCode(${manifest.minSupportedCode}) 不得高于 versionCode(${manifest.versionCode})：" +
-                "解析器不钳制，判定层会把它当成对所有人生效的硬门禁",
+                "decideUpdate 会用 minOf 钳到 latest，这个笔误在运行时被静默吸收成“只允许最新版”，零信号 —— " +
+                "别处都抓不到，只有这条读真实清单文件的用例会发现它",
             manifest.minSupportedCode <= manifest.versionCode
         )
     }
