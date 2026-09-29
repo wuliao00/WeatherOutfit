@@ -16,6 +16,7 @@ import com.jianyi.outfit.ui.scenery.LocalSceneryController
 import com.jianyi.outfit.ui.scenery.SceneryBackground
 import com.jianyi.outfit.ui.scenery.SceneryController
 import com.jianyi.outfit.ui.theme.WeatherOutfitTheme
+import com.jianyi.outfit.ui.update.UpdateGateLayer
 
 /**
  * 应用根节点：风景背景 + 玻璃宿主 + 主题，全部页面共享同一份。
@@ -58,6 +59,13 @@ fun RootScreen(
                 LocalAppDependencies provides deps
             ) {
                 content()
+                // 更新门禁：必须在 content() **之后**，才盖得住所有页面与弹层。
+                //
+                // 为什么挂这一层而不是各页面各挂一份：门禁的语义是"这次冷启动拦一次人"，
+                // 挂在页面上的话，看不看得到门禁就取决于用户停在哪个页面 —— 而拦人的东西
+                // 本来就该在页面之上。RootScreen 恰好是每次冷启动存在一次、且包住全部内容
+                // 的作用域，冷启动检查（UpdateGateLayer 里那句 checkOnce）也只能由它发起。
+                UpdateGateLayer(vm = deps.updateViewModel)
             }
         }
     }

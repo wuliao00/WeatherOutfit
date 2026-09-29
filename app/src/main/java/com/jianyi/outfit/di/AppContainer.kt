@@ -24,6 +24,8 @@ import com.jianyi.outfit.data.repository.SettingsRepository
 import com.jianyi.outfit.data.repository.SettingsRepositoryImpl
 import com.jianyi.outfit.data.repository.WeatherRepository
 import com.jianyi.outfit.data.repository.WeatherRepositoryImpl
+import com.jianyi.outfit.data.update.KtorUpdateHttp
+import com.jianyi.outfit.data.update.UpdateRepository
 import com.jianyi.outfit.notification.DailyPushScheduler
 import com.jianyi.outfit.notification.Notifier
 import com.jianyi.outfit.util.ActivityHolder
@@ -32,7 +34,13 @@ import com.jianyi.outfit.util.AndroidLocationProvider
 import com.jianyi.outfit.util.AndroidNotificationGate
 import com.jianyi.outfit.util.LocationUtil
 import com.jianyi.outfit.ui.scenery.SceneryController
+import com.jianyi.outfit.ui.update.UpdateViewModel
+import com.jianyi.outfit.ui.update.UnsupportedInstaller
+import com.jianyi.outfit.ui.update.newUpdateViewModel
 import com.jianyi.outfit.update.AndroidUpdateGateway
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -121,6 +129,29 @@ class AppContainer(context: Context) : AppDependencies {
     /** 应用内更新的平台能力（下载在 shared，权限与安装页在这里） */
     override val updateGateway: AppUpdateGateway =
         AndroidUpdateGateway(context.applicationContext)
+
+    /**
+     * 更新流程自己的作用域：一次 24MB 的下载不能跟着某个页面死掉，
+     * 用户切了 tab 或者被门禁挡住时也得继续。SupervisorJob 而不是活动生命周期作用域。
+     */
+    private val updateScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /**
+     * 更新状态机。构造走 [newUpdateViewModel] 这个共享构造点，理由是它 5 个参数里有 3 个
+     * 都是接口 —— 两端各 new 一次的时候，顺序换了编译器不会响。
+     *
+     * installer 暂时是 [UnsupportedInstaller]：Task 7 才落地的 ApkDownloader 现在还不存在。
+     * 表现是门禁上点"立即更新"会直接进失败态（"写入失败，请清理手机存储后重试"），
+     * 而不是点了没反应 —— 宁可报得难看，也不要摆一颗按下去什么都不做的按钮。
+     * Task 7 落地时把这一行换成 ApkDownloader(context.applicationContext)。
+     */
+    override val updateViewModel: UpdateViewModel = newUpdateViewModel(
+        appVersion = appVersion,
+        checker = UpdateRepository(KtorUpdateHttp()),
+        installer = UnsupportedInstaller,
+        gateway = updateGateway,
+        scope = updateScope
+    )
 
     /**
      * 风景背景控制器（全应用单例）。

@@ -5,6 +5,7 @@ import com.jianyi.outfit.data.repository.OutfitTemplateRepository
 import com.jianyi.outfit.data.repository.SettingsRepository
 import com.jianyi.outfit.data.repository.WeatherRepository
 import com.jianyi.outfit.ui.scenery.SceneryController
+import com.jianyi.outfit.ui.update.UpdateViewModel
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -47,8 +48,27 @@ interface AppDependencies {
      */
     val appVersion: AppVersion
 
-    /** 应用内更新能力；iOS 恒 supported=false，UI 据此整块不显示 */
+    /**
+     * 应用内更新的平台能力；iOS 恒 supported=false，UI 据此整块不显示。
+     *
+     * 注意这里放的是"只有系统能给的东西"（权限、安装页），
+     * 而**判定与状态机**在下面的 [updateViewModel] 里 —— 两边不是一回事。
+     */
     val updateGateway: AppUpdateGateway
+
+    /**
+     * 更新流程的状态机（容器级单例）。
+     *
+     * 为什么是容器级而不是各页面 new 一个：门禁必须跨页面存在，而
+     * "这次冷启动已经查过 / 已经关过那张卡片 / 已经是门禁"只该有一份真相。
+     * 挂在 deps 上而不是 LocalAppDependencies 之外另开一条通道，
+     * 是因为 RootScreen 那次挂载（UpdateGateLayer）与设置页的手动检查都要读同一个 VM，
+     * 两个 VM 的表现是"设置页点了检查更新，门禁那侧毫无反应"。
+     *
+     * 刻意没有同时暴露 `updateChecker`：VM 已经把判定结论作为 `lastVerdict` 发出来了
+     * （设置页副标题读它），再开一个字段就是同一件事的第二个入口。
+     */
+    val updateViewModel: UpdateViewModel
 
     /** 高帧率申请的状态视图（Android 独有；iOS 实现恒为「不支持」） */
     val highFrameRate: HighFrameRateApi

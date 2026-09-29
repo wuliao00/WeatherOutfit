@@ -22,6 +22,8 @@ import com.jianyi.outfit.data.repository.SettingsRepository
 import com.jianyi.outfit.data.repository.SettingsRepositoryImpl
 import com.jianyi.outfit.data.repository.WeatherRepository
 import com.jianyi.outfit.data.repository.WeatherRepositoryImpl
+import com.jianyi.outfit.data.update.KtorUpdateHttp
+import com.jianyi.outfit.data.update.UpdateRepository
 import com.jianyi.outfit.platform.IosExtremeAlerter
 import com.jianyi.outfit.platform.IosHighFrameRate
 import com.jianyi.outfit.platform.IosLocationProvider
@@ -29,6 +31,12 @@ import com.jianyi.outfit.platform.IosNotificationGate
 import com.jianyi.outfit.platform.IosPushScheduler
 import com.jianyi.outfit.platform.IosUpdateGateway
 import com.jianyi.outfit.ui.scenery.SceneryController
+import com.jianyi.outfit.ui.update.UpdateViewModel
+import com.jianyi.outfit.ui.update.UnsupportedInstaller
+import com.jianyi.outfit.ui.update.newUpdateViewModel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -87,6 +95,23 @@ class IosAppDependencies : AppDependencies {
 
     /** iOS 不提供应用内更新（App Store 规则），详见 [IosUpdateGateway] */
     override val updateGateway: AppUpdateGateway = IosUpdateGateway()
+
+    /**
+     * 与 Android 侧对位的一份，走同一个 [newUpdateViewModel] 构造点。
+     *
+     * 为什么 iOS 也要造一个永远用不上的 VM：门禁层挂在 RootScreen 上，
+     * 两边共用同一份 commonMain 代码，没有"iOS 上不挂"这个分支 ——
+     * 让它存在但整块不显示，比在 UI 里加平台判断便宜。
+     * 真正的开关在 [IosUpdateGateway].supported：VM 的 runCheck 读到 supported=false
+     * 就停在 Hidden，所以 installer 给 [UnsupportedInstaller] 永远不会被调到。
+     */
+    override val updateViewModel: UpdateViewModel = newUpdateViewModel(
+        appVersion = appVersion,
+        checker = UpdateRepository(KtorUpdateHttp()),
+        installer = UnsupportedInstaller,
+        gateway = updateGateway,
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    )
 
     override val highFrameRate: HighFrameRateApi = IosHighFrameRate
 
