@@ -3,17 +3,22 @@ package com.jianyi.outfit.ui.home
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.jianyi.outfit.data.AppDependencies
+import com.jianyi.outfit.data.model.AlmanacDay
 import com.jianyi.outfit.data.model.ForecastDay
+import com.jianyi.outfit.data.model.Horoscope
 import com.jianyi.outfit.data.model.LifeIndex
 import com.jianyi.outfit.data.model.OutfitRecommendation
 import com.jianyi.outfit.data.model.UserPreferences
 import com.jianyi.outfit.data.model.WeatherNow
 import com.jianyi.outfit.data.repository.RateLimitedException
+import com.jianyi.outfit.engine.AlmanacEngine
+import com.jianyi.outfit.engine.HoroscopeEngine
 import com.jianyi.outfit.engine.LifeIndexEngine
 import com.jianyi.outfit.engine.OutfitRecommendationEngine
 import com.jianyi.outfit.platform.currentTimeMillis
 import com.jianyi.outfit.platform.currentHourOfDay
 import com.jianyi.outfit.platform.formatGeoKey
+import com.jianyi.outfit.platform.todayCivilDate
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -64,6 +69,18 @@ class HomeViewModel(private val deps: AppDependencies) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
+
+    /**
+     * 今日黄历：由设置开关 almanacCardEnabled 启停，关闭时置 null ——
+     * 这样「关」只由 ViewModel 一处表达，UI 层不再重复判开关。
+     * 纯离线一次算出：无加载态、无失败态，日期越界等异常已在引擎内收敛为 null。
+     */
+    private val _almanac = MutableStateFlow<AlmanacDay?>(null)
+    val almanac: StateFlow<AlmanacDay?> = _almanac.asStateFlow()
+
+    /** 今日星座：语义与 [almanac] 相同，开关为 horoscopeCardEnabled */
+    private val _horoscope = MutableStateFlow<Horoscope?>(null)
+    val horoscope: StateFlow<Horoscope?> = _horoscope.asStateFlow()
 
     /** 已加载的数据源 key（与仓库缓存 key 同构），防止 Flow 重放触发重复请求；详情页复用其读缓存 */
     private var loadedKey: String? = null
@@ -132,6 +149,17 @@ class HomeViewModel(private val deps: AppDependencies) : ViewModel() {
                             ?: emptyList()
                     )
                 }
+            }
+        }
+        viewModelScope.launch {
+            // 「今天」在收集开始时取一次：跨午夜不刷新是有意取舍；
+            // 若放进 collect 内，每次偏好发射都会白算一遍同一个日期
+            val today = todayCivilDate()
+            deps.settingsRepository.preferences.collect { prefs ->
+                // 引擎是纯函数且无 IO，开关开合时直接重算即可，无需缓存上次结果
+                _almanac.value = if (prefs.almanacCardEnabled) AlmanacEngine.of(today) else null
+                _horoscope.value =
+                    if (prefs.horoscopeCardEnabled) HoroscopeEngine.of(today) else null
             }
         }
     }
