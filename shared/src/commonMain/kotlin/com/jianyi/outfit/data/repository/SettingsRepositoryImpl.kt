@@ -15,7 +15,8 @@ import kotlinx.coroutines.flow.map
  * 设置仓库实现：读写全部走 [PreferenceBackend]，所以这份逻辑两端共用。
  * 平台侧只剩"怎么落盘"这一件事：Android = Preferences DataStore，iOS = NSUserDefaults。
  *
- * **键名与值类型与 DataStore 时代逐字一致**（下面 16 个常量就是全部）。
+ * **键名与值类型与 DataStore 时代逐字一致**（下面 21 个常量就是全部；
+ * `KEY_CARD_*` 三个是新增键，老用户盘上本来就没有，读出来即默认 false）。
  * 这不是风格问题：Android 老用户机器上那个 preferences_pb 文件里的字段名和
  * 类型必须原样对得上，否则升级后偏好读不出来；而读取失败会被后端的
  * `catch { emptyPreferences() }` 兜成"全部恢复默认"，不崩溃、只是悄悄丢设置。
@@ -75,6 +76,14 @@ class SettingsRepositoryImpl(private val backend: PreferenceBackend) : SettingsR
 
     override suspend fun setHighFrameRateEnabled(enabled: Boolean) = write(KEY_HIGH_FPS, enabled)
 
+    /* ============ 今日三卡开关（黄历 / 历史上的今天 / 星座） ============ */
+
+    override suspend fun setAlmanacCardEnabled(enabled: Boolean) = write(KEY_CARD_ALMANAC, enabled)
+
+    override suspend fun setHistoryCardEnabled(enabled: Boolean) = write(KEY_CARD_HISTORY, enabled)
+
+    override suspend fun setHoroscopeCardEnabled(enabled: Boolean) = write(KEY_CARD_HOROSCOPE, enabled)
+
     /* ============ 凭证与须知 ============ */
 
     /** 保存用户自填的 API 凭证；空白视为"未填"，删键以回退内置默认凭证 */
@@ -110,7 +119,11 @@ class SettingsRepositoryImpl(private val backend: PreferenceBackend) : SettingsR
         glassQuality = GlassQuality.safe(str(KEY_GLASS_QUALITY)),
         parallaxEnabled = boolean(KEY_PARALLAX) ?: true,
         breathingEnabled = boolean(KEY_BREATHING) ?: true,
-        highFrameRateEnabled = boolean(KEY_HIGH_FPS) ?: true
+        highFrameRateEnabled = boolean(KEY_HIGH_FPS) ?: true,
+        /* 今日三卡：没写过 = 关，与模型默认值一致 —— 老用户升级后不会凭空多出内容 */
+        almanacCardEnabled = boolean(KEY_CARD_ALMANAC) ?: false,
+        historyCardEnabled = boolean(KEY_CARD_HISTORY) ?: false,
+        horoscopeCardEnabled = boolean(KEY_CARD_HOROSCOPE) ?: false
     )
 
     /**
@@ -143,5 +156,8 @@ class SettingsRepositoryImpl(private val backend: PreferenceBackend) : SettingsR
         internal const val KEY_PARALLAX = "parallax"
         internal const val KEY_BREATHING = "breathing"
         internal const val KEY_HIGH_FPS = "high_fps"
+        internal const val KEY_CARD_ALMANAC = "card_almanac"
+        internal const val KEY_CARD_HISTORY = "card_history"
+        internal const val KEY_CARD_HOROSCOPE = "card_horoscope"
     }
 }

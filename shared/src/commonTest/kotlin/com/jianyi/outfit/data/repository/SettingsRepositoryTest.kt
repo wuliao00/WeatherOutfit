@@ -124,4 +124,35 @@ class SettingsRepositoryTest {
         assertEquals(TempUnit.FAHRENHEIT, prefs.tempUnit)
         assertEquals("sea_sunset", prefs.sceneryKey)
     }
+
+    @Test
+    fun 三张卡开关默认全关且互不影响() = runTest {
+        val repo = SettingsRepositoryImpl(FakeBackend())
+        val defaults = repo.preferences.first()
+        assertFalse(defaults.almanacCardEnabled, "三张卡默认关：升级不该凭空长出内容")
+        assertFalse(defaults.historyCardEnabled)
+        assertFalse(defaults.horoscopeCardEnabled)
+
+        repo.setAlmanacCardEnabled(true)
+        repo.setHistoryCardEnabled(true)
+
+        val after = repo.preferences.first()
+        assertTrue(after.almanacCardEnabled)
+        assertTrue(after.historyCardEnabled)
+        assertFalse(after.horoscopeCardEnabled, "三个开关互相独立")
+    }
+
+    @Test
+    fun 三张卡开关的落盘键名与值类型钉死() = runTest {
+        val backend = FakeBackend()
+        val repo = SettingsRepositoryImpl(backend)
+        repo.setAlmanacCardEnabled(true)
+        repo.setHistoryCardEnabled(true)
+        repo.setHoroscopeCardEnabled(true)
+
+        val saved = backend.current.value
+        assertEquals(true, saved["card_almanac"], "发过版后再改名换型，老用户的开关会静默回到关")
+        assertEquals(true, saved["card_history"])
+        assertEquals(true, saved["card_horoscope"])
+    }
 }

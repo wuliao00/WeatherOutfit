@@ -161,7 +161,12 @@ data class UserPreferences(
     /** 呼吸漂移：背景做极缓慢的缩放漂移，画面不「死」 */
     val breathingEnabled: Boolean = true,
     /** 高帧率：向系统申请以最高刷新率档位渲染（帧率类别 API 需 Android 15+） */
-    val highFrameRateEnabled: Boolean = true
+    val highFrameRateEnabled: Boolean = true,
+    /* ---- 今日三卡（黄历 / 历史上的今天 / 星座）---- */
+    /** 今日三卡开关：默认全关。升级不该给用户凭空加出内容 */
+    val almanacCardEnabled: Boolean = false,
+    val historyCardEnabled: Boolean = false,
+    val horoscopeCardEnabled: Boolean = false
 ) {
     companion object {
         /** 每日推送默认时刻：早上 8 点 */
