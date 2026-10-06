@@ -185,19 +185,21 @@ object HoroscopeEngine {
 
 ```kotlin
 data class AlmanacDay(
-    val solarDate: LocalDate,
-    val lunarText: String,        // 农历乙巳年八月初四
+    val lunarDateText: String,    // 农历丙午年八月廿五（实测形态，含月与日）
+    val ganzhiYear: String,       // 年柱干支，按春节换年
     val ganzhiDay: String,        // 干支纪日
-    val zodiac: String,           // 生肖
+    val zodiac: String,           // 生肖，取年柱地支
     val jieqi: String?,           // 当日节气，无则 null
-    val recommends: List<String>, // 宜
-    val avoids: List<String>,     // 忌
+    val recommends: List<String>, // 宜，已截断到展示上限
+    val avoids: List<String>,     // 忌，已截断到展示上限
     val duty: String,             // 建除十二值
-    val chong: String,            // 冲煞
+    val chongSha: String,         // 冲煞，实测形态如「冲马(丙午)煞南」
     val moonPhase: String,        // 月相
     val festival: String?,        // 农历节日
 )
 ```
+
+模型不存公历日期：日期由调用方经 `CivilDate` 传入，模型只承载黄历内容。
 
 来源标注不是构造参数，而是各模型的伴随常量 `SOURCE_LABEL`（见 4.1）。
 
