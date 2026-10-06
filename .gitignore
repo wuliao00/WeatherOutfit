@@ -17,3 +17,8 @@ local.properties
 # Python 辅助脚本的字节码缓存
 __pycache__/
 *.pyc
+
+# 一次性事实骨架的外部源文件：只抽 (year,month,day,type)，文本一律自撰
+tools/vendor/
+# 骨架提取脚本的产物，可由 tools/extract_today_facts.py 随时再生
+tools/out/
