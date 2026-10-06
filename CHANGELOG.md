@@ -10,6 +10,9 @@
 - 设置页支持自填 API 凭证（appid / appkey / apiurl），留空回退内置默认；凭证仅存本地 DataStore。
 - 设置页新增每日推送时刻选择（6:00 ~ 9:00，默认 8:00）。
 - 新增 GitHub Actions CI：push / PR 触发，跑 lint、单元测试与 Debug 构建。
+- 今日三卡（黄历 / 历史上的今天 / 星座），全部离线、默认关闭、可在设置页逐张开启。
+- `tools/extract_today_facts.py` 与 `tools/validate_today_dataset.py`：历史数据集的骨架提取与结构校验。
+- `docs/content/today-history-style.md`：今日历史事件撰写规范。
 
 ### Changed
 - 天气缓存拆分至独立数据库文件 `weather_cache.db`，云备份与设备迁移按文件排除缓存（Room schema 同步导出至 `app/schemas/`，业务库升级至 v2）。
