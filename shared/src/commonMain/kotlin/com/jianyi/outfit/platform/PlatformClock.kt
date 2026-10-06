@@ -41,6 +41,33 @@ fun epochDayFromCivil(year: Int, month: Int, day: Int): Long {
     return era * 146097 + doe - 719468
 }
 
+/** 公历日期，1 基（month 1~12、day 1~31）。只读值对象，不放逻辑 */
+data class CivilDate(val year: Int, val month: Int, val day: Int)
+
+/**
+ * 儒略日数 → 公历日期（Howard Hinnant 的 civil_from_days）。
+ *
+ * 是 [epochDayFromCivil] 的逆函数，纯数学、零平台 API。之所以不新增一对
+ * expect/actual 的 currentYear()/currentDayOfMonth()：那样两端各写一份
+ * Calendar/NSCalendar 取值，而这份仓库已有的 todayEpochDay() 只要换算一次，
+ * 就同时得到年月日，且与既有 epochDayFromCivil 天然互为校验。
+ */
+fun civilFromEpochDay(epochDay: Long): CivilDate {
+    val z = epochDay + 719468
+    val era = (if (z >= 0) z else z - 146096) / 146097
+    val doe = z - era * 146097
+    val yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+    val y = yoe + era * 400
+    val doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+    val mp = (5 * doy + 2) / 153
+    val day = (doy - (153 * mp + 2) / 5 + 1).toInt()
+    val month = (if (mp < 10) mp + 3 else mp - 9).toInt()
+    return CivilDate((if (month <= 2) y + 1 else y).toInt(), month, day)
+}
+
+/** 今天的公历日期（本地时区）。引擎取「当下」只经这里，便于单测替换 */
+fun todayCivilDate(): CivilDate = civilFromEpochDay(todayEpochDay())
+
 /**
  * 儒略日数 → 中文星期（“星期一”…“星期日”）。
  * epoch day 0 是星期四，所以 +3 取模后 0=星期一。
