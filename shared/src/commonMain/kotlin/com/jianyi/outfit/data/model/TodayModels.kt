@@ -6,8 +6,9 @@ package com.jianyi.outfit.data.model
  * 与天气模型分文件放：这三块是「今日」域，字段会随内容源演进而天气域不会，
  * 混在 Models.kt 里会让两个互不相干的变更理由抢同一个文件。
  *
- * 每个模型都带 sourceLabel 且由引擎赋值 —— UI 不许自己编来源文案，
- * 这是「不把估算包装成官方数据」这条规矩的结构化落法。
+ * 来源文案只以各模型 companion 里的 SOURCE_LABEL 常量暴露、由 UI 直接读，
+ * 不进构造参数 —— 没有构造位点能塞进自编或错配的文案，
+ * 「不把估算包装成官方数据」这条规矩由编译器而非纪律保证。
  */
 
 /** 农历黄历一日 */
@@ -28,8 +29,7 @@ data class AlmanacDay(
     val chongSha: String,
     /** 月相，如「朔」「望」 */
     val moonPhase: String,
-    val festival: String?,
-    val sourceLabel: String
+    val festival: String?
 ) {
     companion object {
         /** 宜/忌各最多展示几项。黄历原文动辄十余项，全铺与极简调性冲突 */
@@ -62,8 +62,7 @@ data class Horoscope(
     val career: String,
     val wealth: String,
     val luckyColor: String,
-    val luckyNumber: Int,
-    val sourceLabel: String
+    val luckyNumber: Int
 ) {
     companion object {
         const val SOURCE_LABEL = "娱乐内容，非预测"
