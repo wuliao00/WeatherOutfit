@@ -4,6 +4,7 @@ import com.jianyi.outfit.data.model.AlmanacDay
 import com.jianyi.outfit.platform.CivilDate
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -24,6 +25,7 @@ import kotlin.test.assertTrue
  * | 字段（实测 API） | 2026-10-05 | 2026-12-22 | 2027-01-01 | 2027-02-06 |
  * |---|---|---|---|---|
  * | 农历日名 getName()（是日名，不含月） | 廿五 | 十四 | 廿四 | 初一 |
+ * | 农历整写 toString()（农历年+月+日；lunarDateText 采用） | 农历丙午年八月廿五 | 农历丙午年十一月十四 | 农历丙午年十一月廿四 | 农历丁未年正月初一 |
  * | 日干支 LunarDay.getSixtyCycle() | 壬子 | 庚午 | 庚辰 | 丙辰 |
  * | 三柱 SixtyCycleDay.toString() | 丙午年丁酉月壬子日 | 丙午年庚子月庚午日 | 丙午年庚子月庚辰日 | 丁未年壬寅月丙辰日 |
  * | 农历年 getName() | 农历丙午年 | 农历丙午年 | 农历丙午年 | 农历丁未年 |
@@ -46,6 +48,9 @@ import kotlin.test.assertTrue
  * | 冲煞 冲{冲柱生肖}({冲柱干支})煞{日支煞方} | 冲马(丙午)煞南 | 冲鼠(甲子)煞北 | 冲猴(庚申)煞北 | 冲猴(戊申)煞北 / 冲鸡(己酉)煞西 |
  *
  * 其它实测要点：
+ * - lunarDateText 取 LunarDay.toString()（实测「农历丙午年八月廿五」，年+月+日整写）：
+ *   LunarDay.getName() 只有日名（「廿五」，1.5.0 sources 为 NAMES[day-1]），单独用它卡面会缺月名；
+ *   toString() 内的农历年与 ganzhiYear 同源（LunarYear.getSixtyCycle()），两字段口径不会分叉。
  * - 宜/忌条目（List<Taboo>）的 toString() = getName()，全锚点合计实测 2~26 项、逐日不定，
  *   所以引擎一律截断到 AlmanacDay.TABOO_DISPLAY_LIMIT。
  * - 冲煞两锚点与便民查询网（wannianrili.bmcx.com）逐字一致：「冲马 （丙午）煞南」
@@ -65,12 +70,29 @@ class AlmanacEngineTest {
     fun produces_full_record_for_today() {
         val a = AlmanacEngine.of(CivilDate(2026, 10, 5))
         assertNotNull(a, "合法日期不该返回 null")
-        assertTrue(a!!.lunarDateText.isNotBlank())
+        // 农历日期是「年+月+日」整写（实测「农历丙午年八月廿五」）；只要日名（「廿五」）是产品缺陷，
+        // 完整的防退化断言见 lunar_date_text_carries_month_and_day_not_bare_day_name
+        assertEquals("农历丙午年八月廿五", a!!.lunarDateText, "农历日期缺月名则卡面分不清哪个月")
         assertTrue(a.ganzhiDay.length in 2..4, "干支纪日应为两字，实到 ${a.ganzhiDay}")
         assertTrue(a.zodiac.length == 1, "生肖应为单字，实到 ${a.zodiac}")
         assertTrue(a.moonPhase.isNotBlank())
         assertTrue(a.duty.isNotBlank())
         assertTrue(AlmanacDay.SOURCE_LABEL.isNotBlank(), "来源标注常量不得为空，否则角标会渲染成空壳")
+    }
+
+    @Test
+    fun lunar_date_text_carries_month_and_day_not_bare_day_name() {
+        // lunarDateText 用 LunarDay.toString()（农历年+月+日，实测见登记表），不用 getName()：
+        // 1.5.0 的 getName() 实测只回日名（「廿五」），卡面缺月名就分不清哪个月。
+        // 两个锚点钉死整写；再显式守卫「不是裸日名」——来源哪天被改回 getName()，这里立刻红。
+        val oct5 = assertNotNull(AlmanacEngine.of(CivilDate(2026, 10, 5)))
+        val dec22 = assertNotNull(AlmanacEngine.of(CivilDate(2026, 12, 22)))
+        assertEquals("农历丙午年八月廿五", oct5.lunarDateText)
+        assertEquals("农历丙午年十一月十四", dec22.lunarDateText)
+        assertTrue(oct5.lunarDateText.contains("八月"), "农历日期缺月名：${oct5.lunarDateText}")
+        assertTrue(dec22.lunarDateText.contains("十一月"), "农历日期缺月名：${dec22.lunarDateText}")
+        assertNotEquals("廿五", oct5.lunarDateText, "农历日期不能退化成裸日名")
+        assertNotEquals("十四", dec22.lunarDateText, "农历日期不能退化成裸日名")
     }
 
     @Test

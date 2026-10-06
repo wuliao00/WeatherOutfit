@@ -186,7 +186,7 @@ object HoroscopeEngine {
 ```kotlin
 data class AlmanacDay(
     val solarDate: LocalDate,
-    val lunarText: String,        // 乙巳年八月初四
+    val lunarText: String,        // 农历乙巳年八月初四
     val ganzhiDay: String,        // 干支纪日
     val zodiac: String,           // 生肖
     val jieqi: String?,           // 当日节气，无则 null

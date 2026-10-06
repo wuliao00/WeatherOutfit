@@ -30,7 +30,10 @@ object AlmanacEngine {
         val avoids = lunar.getAvoids().map { it.toString() }.filter { it.isNotBlank() }
 
         AlmanacDay(
-            lunarDateText = lunar.getName(),
+            // 农历日期用 toString()（实测「农历丙午年八月廿五」，年+月+日整写）：getName() 实测只回日名
+            // （「廿五」），卡面缺月名就分不清哪个月；toString() 的年与 ganzhiYear 同源
+            // （LunarYear.getSixtyCycle()），两字段的换年口径不会分叉。
+            lunarDateText = lunar.toString(),
             // 干支年取农历年干支（春节换年），不取立春换年的年柱——理由见 zodiacOf 的注释
             ganzhiYear = lunar.getLunarMonth().getLunarYear().getSixtyCycle().getName(),
             ganzhiDay = lunar.getSixtyCycle().getName(),
