@@ -64,4 +64,9 @@ interface SettingsRepository {
     suspend fun setParallaxEnabled(enabled: Boolean)
     suspend fun setBreathingEnabled(enabled: Boolean)
     suspend fun setHighFrameRateEnabled(enabled: Boolean)
+
+    /* ---- 今日三卡开关：默认全关，逐张独立 ---- */
+    suspend fun setAlmanacCardEnabled(enabled: Boolean)
+    suspend fun setHistoryCardEnabled(enabled: Boolean)
+    suspend fun setHoroscopeCardEnabled(enabled: Boolean)
 }
