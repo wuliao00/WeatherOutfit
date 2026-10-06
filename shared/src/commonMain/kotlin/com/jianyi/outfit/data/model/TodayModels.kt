@@ -13,6 +13,7 @@ package com.jianyi.outfit.data.model
 
 /** 农历黄历一日 */
 data class AlmanacDay(
+    /** 农历日期整写，形如「农历丙午年八月廿五」；必须含月名，不能是裸日名（LunarDay.getName() 只有日名） */
     val lunarDateText: String,
     val ganzhiYear: String,
     val ganzhiDay: String,
