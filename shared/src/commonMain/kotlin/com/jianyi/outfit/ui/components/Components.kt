@@ -1,11 +1,13 @@
 package com.jianyi.outfit.ui.components
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -15,12 +17,14 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 /**
- * 可复用 UI 组件：指标条目、分节卡片、空态、错误面板。
+ * 可复用 UI 组件：指标条目、分节卡片、空态、错误面板、来源角标。
  * 布局遵循留白规则：卡片内边距 24dp。
  */
 
@@ -134,4 +138,22 @@ fun ErrorPanel(
             TextButton(onClick = onRetry) { Text("重试") }
         }
     }
+}
+
+/**
+ * 通用来源角标：说明内容性质不是官方数据时一律挂上，样式与「本地估算」保持一致。
+ * 放公共组件文件而不是某张卡里：它是三张卡共用的，放卡文件里会让另两张卡反向依赖那张卡。
+ */
+@Composable
+fun SourceBadge(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall,
+        fontSize = 10.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = modifier
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f))
+            .padding(horizontal = 7.dp, vertical = 2.dp)
+    )
 }
