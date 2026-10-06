@@ -21,7 +21,7 @@
 - 三张卡**全部离线**。任何任务都不得新增 Ktor 接口、HTTP 调用或 Room 表。
 - 日期与时刻一律经 `platform/PlatformClock.kt` 取值，**引擎内部不调平台 API**，也不引入 `Clock.System`——否则 commonTest 与 iOS 的时间无法固定。
 - `HomeScreen.kt`（现 983 行）**只允许增加卡片挂载调用，不允许写卡片内容**。
-- 每张卡的来源标注由**引擎**在模型里给出（`sourceLabel` 字段），UI 不得自行编造来源文案。依据是 `LifeIndexEngine.kt` 顶上那句：「把估算包装成官方数据是这个 App 最不该做的事」。
+- 每张卡的来源标注由模型自己的 `SOURCE_LABEL` 常量给出，UI 一律读常量；模型上不得存在可代入的标注参数。依据是 `LifeIndexEngine.kt` 顶上那句：「把估算包装成官方数据是这个 App 最不该做的事」。
 - 「历史上的今天」**每日 3 条**（已确认默认）。
 - 星座运势文案**中性陈述**，不带幽默/口语（已确认默认）。
 - 本期**只接 Android UI**；引擎与数据仍在 commonMain，iOS 白拿但不改 `ios/` 工程（已确认默认）。
@@ -347,7 +347,7 @@ package com.jianyi.outfit.data.model
  * 与天气模型分文件放：这三块是「今日」域，字段会随内容源演进而天气域不会，
  * 混在 Models.kt 里会让两个互不相干的变更理由抢同一个文件。
  *
- * 每个模型都带 sourceLabel 且由引擎赋值 —— UI 不许自己编来源文案，
+ * 来源标注是各自的 SOURCE_LABEL 常量、不是构造参数 —— UI 只能读常量，
  * 这是「不把估算包装成官方数据」这条规矩的结构化落法。
  */
 
@@ -369,8 +369,7 @@ data class AlmanacDay(
     val chongSha: String,
     /** 月相，如「朔」「望」 */
     val moonPhase: String,
-    val festival: String?,
-    val sourceLabel: String
+    val festival: String?
 ) {
     companion object {
         /** 宜/忌各最多展示几项。黄历原文动辄十余项，全铺与极简调性冲突 */
@@ -403,8 +402,7 @@ data class Horoscope(
     val career: String,
     val wealth: String,
     val luckyColor: String,
-    val luckyNumber: Int,
-    val sourceLabel: String
+    val luckyNumber: Int
 ) {
     companion object {
         const val SOURCE_LABEL = "娱乐内容，非预测"
@@ -421,7 +419,7 @@ Expected: BUILD SUCCESSFUL
 
 ```bash
 git add shared/src/commonMain/kotlin/com/jianyi/outfit/data/model/TodayModels.kt
-git commit -m "$(printf 'feat(model): 今日三卡领域模型\n\n每个模型自带 sourceLabel，来源文案由引擎给、UI 不得编造。')"
+git commit -m "$(printf 'feat(model): 今日三卡领域模型\n\n来源标注是各模型的伴随常量，UI 只能读常量、无从编造。')"
 ```
 
 ---
@@ -470,7 +468,7 @@ class AlmanacEngineTest {
         assertTrue(a.zodiac.length == 1, "生肖应为单字，实到 ${a.zodiac}")
         assertTrue(a.moonPhase.isNotBlank())
         assertTrue(a.duty.isNotBlank())
-        assertEquals(AlmanacDay.SOURCE_LABEL, a.sourceLabel, "来源标注必须由引擎给出")
+        assertTrue(AlmanacDay.SOURCE_LABEL.isNotBlank(), "来源标注常量不得为空，否则角标会渲染成空壳")
     }
 
     @Test
@@ -582,8 +580,7 @@ object AlmanacEngine {
             duty = lunar.getDuty().getName(),
             chongSha = chongShaOf(lunar),
             moonPhase = lunar.getPhase().getName(),
-            festival = lunar.getFestival()?.getName(),
-            sourceLabel = AlmanacDay.SOURCE_LABEL
+            festival = lunar.getFestival()?.getName()
         )
     }
 }
@@ -1241,7 +1238,7 @@ class HoroscopeEngineTest {
             val h = HoroscopeEngine.of(d)
             assertNotNull(h, "${d.year}-${d.month}-${d.day} 返回 null，说明有星座没配上文案池")
             seen += h!!.constellation
-            assertEquals(Horoscope.SOURCE_LABEL, h.sourceLabel)
+            assertTrue(Horoscope.SOURCE_LABEL.isNotBlank(), "来源标注常量不得为空")
             assertTrue(h.overall.isNotBlank() && h.love.isNotBlank() &&
                 h.career.isNotBlank() && h.wealth.isNotBlank())
             assertTrue(h.luckyNumber in 1..9, "幸运数字应 1~9，实到 ${h.luckyNumber}")
@@ -1381,8 +1378,7 @@ object HoroscopeEngine {
             career = HoroscopePool.career[name]?.getOrNull(k) ?: return null,
             wealth = HoroscopePool.wealth[name]?.getOrNull(k) ?: return null,
             luckyColor = HoroscopePool.colors[(signIndex + doy) % HoroscopePool.colors.size],
-            luckyNumber = (signIndex * 7 + doy * 3) % 9 + 1,
-            sourceLabel = Horoscope.SOURCE_LABEL
+            luckyNumber = (signIndex * 7 + doy * 3) % 9 + 1
         )
     }
 
@@ -1479,7 +1475,7 @@ fun AlmanacCard(day: AlmanacDay, modifier: Modifier = Modifier) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.weight(1f))
-            SourceBadge(text = day.sourceLabel)
+            SourceBadge(text = AlmanacDay.SOURCE_LABEL)
         }
 
         val meta = listOfNotNull(
@@ -1832,7 +1828,7 @@ git commit -m "$(printf 'docs: 修订产品宣言并补今日三卡说明\n\n「
 | 3.2 三步流水线 + schema + 130KB 体积 | Task 6 / Task 7 |
 | 3.3 星座由 Constellation 本地出 + 确定性池 | Task 9 |
 | 4 文件结构表 | 各任务 Files 段一一对应 |
-| 4.1 `sourceLabel` 由引擎给 | Task 3（字段）+ Task 4/8/9（赋值）+ Task 10（渲染）+ 测试断言 |
+| 4.1 来源标注以常量暴露、UI 读常量 | Task 3（三处 `SOURCE_LABEL` 常量）+ Task 10（读常量渲染）；模型上无可代入参数，编造在结构上不可能 |
 | 4.2 模型字段 | Task 3 |
 | 5 日期经 PlatformClock | Task 2（比 spec 原设想更优：不加 expect/actual） |
 | 6 三条标注 | Task 3 SOURCE_LABEL + Task 10 SourceBadge + Task 12 副标题 |
