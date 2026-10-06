@@ -179,7 +179,7 @@ object HoroscopeEngine {
 }
 ```
 
-三者的返回值都自带**来源标注字段**（`sourceLabel: String`），由引擎决定文案，UI 不得自行编造来源。这是把 `LifeIndexEngine` 那句注释——「把估算包装成官方数据是这个 App 最不该做的事」——变成结构约束。
+三者的来源标注以**各自的 `SOURCE_LABEL` 常量**暴露，UI 一律读常量。模型上不存在任何可代入的标注参数，所以「UI 不得自行编造来源」是编译期保证，而不是纪律要求。这是把 `LifeIndexEngine` 那句注释——「把估算包装成官方数据是这个 App 最不该做的事」——变成结构约束。
 
 ### 4.2 领域模型
 
@@ -196,9 +196,10 @@ data class AlmanacDay(
     val chong: String,            // 冲煞
     val moonPhase: String,        // 月相
     val festival: String?,        // 农历节日
-    val sourceLabel: String,
 )
 ```
+
+来源标注不是构造参数，而是各模型的伴随常量 `SOURCE_LABEL`（见 4.1）。
 
 `recommends` / `avoids` 在 UI 上**截断到前 3 项**并给出展开态；黄历原文动辄十余项，全量铺开与极简调性冲突。
 
