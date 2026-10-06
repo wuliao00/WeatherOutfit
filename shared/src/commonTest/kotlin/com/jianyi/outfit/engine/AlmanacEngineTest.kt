@@ -41,7 +41,8 @@ import kotlin.test.assertTrue
  * | 字段（实测 API） | 2026-10-05 | 2026-12-22 | 2026-06-21 | 2027-02-04 / 02-05 |
  * |---|---|---|---|---|
  * | 最近节气 getTerm() / 距节气天数 getTermDay().getDayIndex() | 秋分 / 12 | 冬至 / 0 | 夏至 / 0 | 立春 / 0、1 |
- * | 年柱 SixtyCycleDay.getYear()（立春换年） | 丙午/马 | 丙午/马 | 丙午/马 | 丁未/羊（农历年仍丙午，02-06 春节才换） |
+ * | 年柱 SixtyCycleDay.getYear()（立春换年；仅登记，引擎不用） | 丙午/马 | 丙午/马 | 丙午/马 | 丁未/羊（农历年仍丙午，02-06 春节才换） |
+ * | 农历年干支 LunarYear.getSixtyCycle()（春节换年，引擎采用） | 丙午/马 | 丙午/马 | 丙午/马 | 丙午/马（02-06 春节起丁未/羊） |
  * | 冲煞 冲{冲柱生肖}({冲柱干支})煞{日支煞方} | 冲马(丙午)煞南 | 冲鼠(甲子)煞北 | 冲猴(庚申)煞北 | 冲猴(戊申)煞北 / 冲鸡(己酉)煞西 |
  *
  * 其它实测要点：
@@ -50,9 +51,11 @@ import kotlin.test.assertTrue
  * - 冲煞两锚点与便民查询网（wannianrili.bmcx.com）逐字一致：「冲马 （丙午）煞南」
  *   与「冲鼠 （甲子）煞北」（外部黄历在括号前多一个空格）；冲柱干支 = 日柱在六十甲子
  *   表上退 6 位（壬子→丙午），不是简单按 +6 走六十甲子（那会得到戊午）。
- *   模型 KDoc 的示例「冲鼠(午)煞北」是单字括号的示意写法，实测括号内为两字干支。
- * - 年柱与生肖同取「干支年」（立春换年，tyme4kt 对年柱的定义），不用农历年干支
- *   （春节换年）：否则 2027-02-04 起会出现「丁未年 · 属马」的自相矛盾组合。
+ *   模型 KDoc 的示例「冲马(丙午)煞南」与实测格式一致。
+ * - 年柱/生肖取农历年干支（**春节换年**，民俗/大众口径；LunarYear.getSixtyCycle()），
+ *   不取 SixtyCycleDay.getYear()（立春换年，命理/术数口径，本 App 不做命理）：春节可
+ *   晚于立春（2027 立春 02-04、春节 02-06），立春换年会让这两天的干支年/生肖先于
+ *   农历年切换。分歧窗口由 year_pillar_switches_at_lunar_new_year_not_at_lichun 钉死。
  * - 越界日期（2 月 30 日 / 13 月 / 公元 0 年 / 999999 年）在 SolarDay 构造期即抛
  *   IllegalArgumentException，引擎入口 runCatching 收敛为 null。
  */
@@ -120,6 +123,22 @@ class AlmanacEngineTest {
         // 两锚点与便民查询网 2026-10-05 / 2026-12-22 两页逐字一致（外部黄历在括号前多一个空格）。
         assertEquals("冲马(丙午)煞南", AlmanacEngine.of(CivilDate(2026, 10, 5))!!.chongSha)
         assertEquals("冲鼠(甲子)煞北", AlmanacEngine.of(CivilDate(2026, 12, 22))!!.chongSha)
+    }
+
+    @Test
+    fun year_pillar_switches_at_lunar_new_year_not_at_lichun() {
+        // 口径钉死：干支年/生肖随**春节**换（民俗口径），不随立春换（命理口径）。
+        // 2027 立春（02-04）早于春节（02-06），这两天是两种口径的分歧窗口：
+        // 立春口径已给出丁未/羊，本引擎取春节口径，仍为丙午/马，春节当天才换。
+        val lichun = assertNotNull(AlmanacEngine.of(CivilDate(2027, 2, 4)), "2027-02-04 立春日")
+        assertEquals("丙午", lichun.ganzhiYear, "立春不换年：02-04 仍是丙午（立春口径会得到丁未）")
+        assertEquals("马", lichun.zodiac, "立春不换生肖：02-04 仍是马（立春口径会得到羊）")
+        val cnyEve = assertNotNull(AlmanacEngine.of(CivilDate(2027, 2, 5)), "2027-02-05 除夕")
+        assertEquals("丙午", cnyEve.ganzhiYear, "春节没到，02-05 仍是丙午")
+        assertEquals("马", cnyEve.zodiac)
+        val cny = assertNotNull(AlmanacEngine.of(CivilDate(2027, 2, 6)), "2027-02-06 春节")
+        assertEquals("丁未", cny.ganzhiYear, "春节当天干支年才换丁未")
+        assertEquals("羊", cny.zodiac, "春节当天生肖才换羊")
     }
 
     @Test
