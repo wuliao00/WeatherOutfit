@@ -230,6 +230,33 @@ fun SettingsScreen(
                 )
             }
 
+            // ===== 今日信息 =====
+            // 三行副标题复述来源性质（推算 / 自撰 / 无依据），与卡片角标同一立场：
+            // 用户在这里就该知道要打开的是什么，而不是开了之后才发现。
+            Section("今日信息") {
+                SwitchRow(
+                    title = "黄历",
+                    subtitle = "农历 · 干支 · 宜忌，按传统历法推算",
+                    checked = state.prefs.almanacCardEnabled,
+                    onCheckedChange = viewModel::setAlmanacCard,
+                    dark = dark
+                )
+                SwitchRow(
+                    title = "历史上的今天",
+                    subtitle = "每天 3 条，史料整理未逐条核实",
+                    checked = state.prefs.historyCardEnabled,
+                    onCheckedChange = viewModel::setHistoryCard,
+                    dark = dark
+                )
+                SwitchRow(
+                    title = "星座运势",
+                    subtitle = "娱乐内容，无预测依据",
+                    checked = state.prefs.horoscopeCardEnabled,
+                    onCheckedChange = viewModel::setHoroscopeCard,
+                    dark = dark
+                )
+            }
+
             // ===== 穿搭偏好 =====
             Section("穿搭偏好") {
                 LabeledSegments(

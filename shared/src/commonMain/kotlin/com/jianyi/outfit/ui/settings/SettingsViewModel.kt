@@ -148,6 +148,24 @@ class SettingsViewModel(private val deps: AppDependencies) : ViewModel() {
         viewModelScope.launch { deps.settingsRepository.setHighFrameRateEnabled(enabled) }
     }
 
+/* ============ 今日信息 ============ */
+
+    /**
+     * 今日三卡开关：各自独立、默认全关。
+     * 与推送开关不同，这里没有要联动对齐的调度任务，纯偏好直写即可。
+     */
+    fun setAlmanacCard(enabled: Boolean) {
+        viewModelScope.launch { deps.settingsRepository.setAlmanacCardEnabled(enabled) }
+    }
+
+    fun setHistoryCard(enabled: Boolean) {
+        viewModelScope.launch { deps.settingsRepository.setHistoryCardEnabled(enabled) }
+    }
+
+    fun setHoroscopeCard(enabled: Boolean) {
+        viewModelScope.launch { deps.settingsRepository.setHoroscopeCardEnabled(enabled) }
+    }
+
     /** 重置免责声明确认状态：下次启动重新弹出使用须知 */
     fun resetDisclaimer() {
         viewModelScope.launch {
