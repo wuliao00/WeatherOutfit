@@ -25,7 +25,7 @@ data class AlmanacDay(
     val avoids: List<String>,
     /** 建除十二值，如「建」「除」 */
     val duty: String,
-    /** 冲煞描述，如「冲鼠(午)煞北」 */
+    /** 冲煞描述，如「冲马(丙午)煞南」 */
     val chongSha: String,
     /** 月相，如「朔」「望」 */
     val moonPhase: String,

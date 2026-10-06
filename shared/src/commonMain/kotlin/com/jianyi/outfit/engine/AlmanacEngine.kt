@@ -25,16 +25,14 @@ object AlmanacEngine {
      */
     fun of(date: CivilDate): AlmanacDay? = runCatching {
         val lunar = SolarDay(date.year, date.month, date.day).getLunarDay()
-        // 年柱/宜忌/建除/冲煞都由干支日派生，取一次共用，避免按字段各推一遍
-        val cycleDay = lunar.getSixtyCycleDay()
 
         val recommends = lunar.getRecommends().map { it.toString() }.filter { it.isNotBlank() }
         val avoids = lunar.getAvoids().map { it.toString() }.filter { it.isNotBlank() }
 
         AlmanacDay(
             lunarDateText = lunar.getName(),
-            // 干支年（立春换年），与生肖取同一柱——理由见 zodiacOf 的注释
-            ganzhiYear = cycleDay.getYear().getName(),
+            // 干支年取农历年干支（春节换年），不取立春换年的年柱——理由见 zodiacOf 的注释
+            ganzhiYear = lunar.getLunarMonth().getLunarYear().getSixtyCycle().getName(),
             ganzhiDay = lunar.getSixtyCycle().getName(),
             zodiac = zodiacOf(lunar),
             jieqi = jieqiOf(date),
@@ -50,15 +48,17 @@ object AlmanacEngine {
     /* ============ 三个需要拆解到 tyme4kt 原语的字段 ============ */
 
     /**
-     * 生肖：取**年柱**地支的生肖（丙午→马），不是日柱。
+     * 生肖：取**干支年**（农历年）地支的生肖（丙午→马），不是日柱。
      *
-     * 年柱用 SixtyCycleDay.getYear()（立春换年）而不是农历年干支（春节换年），
-     * 与 ganzhiYear 保持同一柱——否则会出现「丁未年 · 属马」这种自相矛盾的组合
-     * （登记表实测：2027-02-04 起年柱已是丁未/羊，而农历年到 02-06 春节才换）。
+     * 干支年取农历年干支（**春节换年**，民俗/大众口径；LunarYear.getSixtyCycle()），
+     * 不取 SixtyCycleDay.getYear()（立春换年）：立春换年是命理/术数口径，本 App 不做命理。
+     * 春节可晚于立春（2027：立春 02-04、春节 02-06），立春换年会让这两天的干支年/生肖
+     * 先于农历年切换，与卡面农历日期所属的农历年脱节——分歧窗口由
+     * year_pillar_switches_at_lunar_new_year_not_at_lichun 钉死。
      * tyme4kt 的 EarthBranch.getZodiac() 就是子鼠丑牛这张表，不用自己抄一份。
      */
     private fun zodiacOf(lunar: LunarDay): String =
-        lunar.getSixtyCycleDay().getYear().getEarthBranch().getZodiac().getName()
+        lunar.getLunarMonth().getLunarYear().getSixtyCycle().getEarthBranch().getZodiac().getName()
 
     /**
      * 当日节气名：只在恰为节气当天返回，否则 null（spec：非节气日 UI 不显示该字段）。
