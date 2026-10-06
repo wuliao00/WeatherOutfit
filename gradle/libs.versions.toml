@@ -46,6 +46,9 @@ junit = "4.13.2"
 haze = "1.6.10"
 # 启动屏：与风景背景衔接，消除冷启动白/黑闪
 splashscreen = "1.0.1"
+# 黄历离线算法库（MIT，纯 KMP，各 target 传递依赖为空——见 spec 2.6）
+# 不要顺手引 lunar-java：那是 JVM-only jar，进不了 commonMain
+tyme4kt = "1.5.0"
 
 [libraries]
 # AndroidX 基础
@@ -109,6 +112,8 @@ coil3-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref
 coil3-network-okhttp = { group = "io.coil-kt.coil3", name = "coil-network-okhttp", version.ref = "coil3" }
 # iOS 的图片网络引擎：Coil3 的 Ktor 适配（它内部就是我们已经在用的 ktor-client + Darwin）
 coil3-network-ktor3 = { group = "io.coil-kt.coil3", name = "coil-network-ktor3", version.ref = "coil3" }
+
+tyme4kt = { group = "cn.6tail", name = "tyme4kt", version.ref = "tyme4kt" }
 
 # JSON：仅测试用（对拍参照实现），主代码一律 kotlinx-serialization-json
 gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }

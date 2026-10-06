@@ -119,6 +119,9 @@ kotlin {
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.content.negotiation)
             implementation(libs.ktor.client.serialization)
+
+            // 黄历离线算法库（纯 KMP，各 target 无传递依赖——见 spec 2.6）
+            implementation(libs.tyme4kt)
         }
         androidMain.dependencies {
             implementation(libs.ktor.client.okhttp)
