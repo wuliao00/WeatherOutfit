@@ -151,6 +151,9 @@ fun SourceBadge(text: String, modifier: Modifier = Modifier) {
         style = MaterialTheme.typography.labelSmall,
         fontSize = 10.sp,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
+        // 角标是「这块内容来自哪里」的一句话声明，折成两行就会盖住卡片正文的呼吸位；
+        // 换行由调用侧的表头让位（如 AlmanacCard 的农历日期先省略）来保证，这里只做兜底
+        maxLines = 1,
         modifier = modifier
             .clip(CircleShape)
             .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f))
