@@ -8,7 +8,7 @@
 ![API](https://img.shields.io/badge/API-26%20~%2035-blue)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
-**A native Android app that intelligently recommends outfits based on real-time weather.** Built on the China Meteorological Administration data API (apihz.cn), it generates outfit plans for three scenarios — commute, outdoor, and casual — across four dimensions: temperature, humidity, UV index, and wind, with personalized adjustments for cold/heat tolerance, preferred style, and more. The app strictly follows four design principles: "clarity, obedience, depth, and minimalism": the home screen shows only the temperature, weather condition, and outfit recommendation — no social features, no ads, no news feed — and the whole app uses no more than three primary colors.
+**A native Android app that intelligently recommends outfits based on real-time weather.** Built on the China Meteorological Administration data API (apihz.cn), it generates outfit plans for three scenarios — commute, outdoor, and casual — across four dimensions: temperature, humidity, UV index, and wind, with personalized adjustments for cold/heat tolerance, preferred style, and more. The app strictly follows four design principles: "clarity, obedience, depth, and minimalism": the home screen shows only the temperature, weather condition, and outfit recommendation (the three "today" cards have to be switched on in Settings; by default the first screen looks exactly as it did before) — no social features, no ads, no notification spam. The three today cards are off by default and each one can be turned off independently; none of them makes any network request. The whole app uses no more than three primary colors.
 
 > Works out of the box: the project ships with public test credentials, so you can clone, build, and run it directly; for production use, please register your own personal credentials (see below). This app is completely free, its sole author is "Mo" (莫), and any attempt to charge money in this app's name is a scam.
 
@@ -25,8 +25,11 @@
 | Home | Large centered temperature + weather condition + four indicators (feels-like/humidity/wind/UV) + outfit recommendation card (long-press to save as a template) |
 | Outfit Details | Outfit plans for three scenarios (commute / outdoor / casual) with checkable item lists; supports custom outfit templates (swipe left to delete) |
 | City Management | Province + city search, GPS location, quick switching between recent cities; on cold start, auto-locates with "GPS first → IP fallback" |
-| Settings | Cold/heat tolerance / preferred style / gender, temperature and wind units, daily outfit push notification (time selectable), severe weather alerts, custom API credentials, re-view the usage notice |
+| Settings | Background and motion (scenery mode / parallax / breathing), three blur levels, high frame-rate switch, cold/heat tolerance / preferred style / gender, temperature and wind units, daily outfit push notification (time selectable), severe weather alerts, custom API credentials, today-card toggles (almanac / history / horoscope, all off by default), re-view the usage notice |
 | Usage Notice | First-launch dialog: author "Mo" (莫), free-of-charge statement, anti-scam reminder, data source and privacy notes; checking "Don't show again" persists the setting and the dialog never appears again |
+| Chinese almanac | Lunar date / sexagenary day / zodiac animal / solar terms / auspicious and inauspicious activities / moon phase / festivals, **computed fully offline**, off by default |
+| Today in history | 3 entries per day, every description written by this project, off by default |
+| Horoscope | Sun-sign computed locally; the fortunes come from a hand-written pool rotated by date and are labelled as entertainment, off by default |
 
 ## Tech Stack
 
@@ -141,6 +144,10 @@ Data source: China Meteorological Administration data provided by apihz.cn (free
 - **GPS depends on Google Play Services**: on devices without GMS, location fails and the app prompts the user to switch to search or IP-based location; functionality is not blocked.
 - **Daily push notifications** are based on a persistent WorkManager periodic task (every 24 hours; the push time can be chosen in Settings and may drift a few minutes under battery-saving policies); the task is persisted with the system and **automatically restored after device reboot without reopening the app** (the boot receiver realigns it to the configured time); on Android 13+, notification permission is requested the first time the feature is enabled.
 - **Dark mode** follows the system (background `#121212`, cards `#1E1E1E`, text `#E0E0E0`, avoiding pure black).
+- **The almanac is a computation, not an authority**: auspicious and inauspicious activities are derived locally by `tyme4kt` from the twelve building-removing values and spirit-killer rules; almanacs disagree with each other, so this is **not an authoritative almanac**. Both the card and the Settings page label it "按传统历法推算" (computed from traditional calendrical rules).
+- **Today in history is a self-authored dataset**: only the bare date facts are borrowed from a public catalogue; every description was written by this project. Entries have **not been verified one by one**, and the content only changes when the app is updated.
+- **The horoscope is not connected to any data source**: no reliable free source exists on the market (even the open-source endpoint people keep citing just reads from a fixed pool of canned text), so this app writes its own pool and labels it "娱乐内容，非预测" (entertainment, not a prediction).
+- **The three today cards make no network requests**, so they are unaffected by weather-API rate limits and keep rendering with the network off.
 
 ## License
 
@@ -150,3 +157,4 @@ This project is open-sourced under the [MIT License](LICENSE), author "Mo" (莫)
 
 - Weather data: China Meteorological Administration data provided by [apihz.cn 接口盒子](https://cn.apihz.cn)
 - Icons and design guidelines: [Material Design 3](https://m3.material.io/)
+- Lunar / almanac computation: [6tail/tyme4kt](https://github.com/6tail/tyme4kt) (MIT)
