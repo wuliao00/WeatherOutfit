@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.jianyi.outfit.data.model.AlmanacDay
 import com.jianyi.outfit.ui.components.SourceBadge
@@ -36,7 +37,13 @@ fun AlmanacCard(day: AlmanacDay, modifier: Modifier = Modifier) {
                 text = day.lunarDateText,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onSurface,
+                // 农历整写是 10 字上下的长串，窄屏/横屏下不给上限就会折行，
+                // 把角标挤成第二行（同类事故 HomeScreen.kt:407-412 记过）。
+                // 让日期先省略，保住角标始终是一整块可读的来源标注。
+                modifier = Modifier.weight(1f, fill = false),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = day.ganzhiDay,
