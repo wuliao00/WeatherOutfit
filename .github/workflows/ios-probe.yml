@@ -71,36 +71,37 @@ jobs:
           set -o pipefail
           ./gradlew :shared:iosSimulatorArm64Test --no-daemon --stacktrace 2>&1 | tee ios-test.log
 
-      # 失败时把「哪个用例红了」写进 job summary。
-      # 为什么需要这步：制品要登录才能下载，日志端点在未认证会话上是 404，而本机是 Windows
-      # 编不了 iOS —— summary 是 check-run API 上**匿名可读**的唯一出口。
-      # 这条既有实际用途（定位红用例），也是这个 job 存在的意义：失败要能归因。
-      - name: Summarize failing iOS tests
+      # 失败时把「哪个用例红了」暴露成**可匿名读取**的形式。
+      # 走过的弯路：job summary 在 check-run API 上是空的、制品与日志端点都要认证，
+      # 而开发机是 Windows 编不了 iOS、沙箱又不放行 shell 出网。唯一匿名可读的出口是
+      # **workflow command 生成的 annotation**（`::error::` 那套），所以用例名走这里。
+      - name: Report failing iOS tests as annotations
         if: failure()
         run: |
+          set -u
           {
             echo "## iOS 模拟器测试失败"
             echo
             echo '### Gradle 输出里的失败相关行'
             echo '```'
-            grep -nE 'FAILED|AssertionError|Exception|^e: |Caused by' ios-test.log | head -60
+            grep -nE 'FAILED|AssertionError|Exception|^e: |Caused by' ios-test.log | head -60 || true
             echo '```'
-            echo
-            echo '### 失败用例（test-results XML）'
-            echo '```'
-            files=$(find shared/build/test-results -name '*.xml' 2>/dev/null)
-            if [ -n "$files" ]; then
-              grep -h -E '<testcase |<failure|<error' $files | head -100
-            else
-              echo "无 test-results 目录：任务在产出报告前就失败了（编译期/初始化期）"
-            fi
-            echo '```'
-            echo
-            echo '### 尾部输出'
-            echo '```'
-            tail -40 ios-test.log
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          } >> "$GITHUB_STEP_SUMMARY" || true
+
+          files=$(find shared/build/test-results -name '*.xml' 2>/dev/null || true)
+          if [ -n "$files" ]; then
+            echo "::error::test-results 已产出，以下列出全部用例与失败信息"
+            grep -h -o '<testcase name="[^"]*" classname="[^"]*"' $files | head -45 \
+              | sed 's/<testcase name="//; s/" classname="/ @ /; s/"$//' \
+              | while IFS= read -r line; do echo "::notice::CASE $line"; done
+            grep -h -o '<failure[^>]*message="[^"]*"' $files | head -20 \
+              | sed 's/.*message="//; s/"$//' | cut -c1-400 \
+              | while IFS= read -r line; do echo "::error::FAIL $line"; done
+          else
+            echo "::error::无 test-results（任务在产出报告前失败）——附日志尾部 25 行"
+            tail -25 ios-test.log | cut -c1-400 \
+              | while IFS= read -r line; do echo "::error::LOG $line"; done
+          fi
 
       # 失败时把逐用例结果留成制品，否则只能看到 "Compilation finished with errors" 那一行
       - name: Upload iOS test results
