@@ -67,7 +67,40 @@ jobs:
       # 本机是 Windows，iOS target 压根不参与编译，所以模拟器测试是唯一能拿到
       # 「iOS 上真跑过」证据的地方 —— 没有这一步，iOS 侧的所有结论都只是"编译器没意见"。
       - name: Run shared tests on the iOS simulator
-        run: ./gradlew :shared:iosSimulatorArm64Test --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          ./gradlew :shared:iosSimulatorArm64Test --no-daemon --stacktrace 2>&1 | tee ios-test.log
+
+      # 失败时把「哪个用例红了」写进 job summary。
+      # 为什么需要这步：制品要登录才能下载，日志端点在未认证会话上是 404，而本机是 Windows
+      # 编不了 iOS —— summary 是 check-run API 上**匿名可读**的唯一出口。
+      # 这条既有实际用途（定位红用例），也是这个 job 存在的意义：失败要能归因。
+      - name: Summarize failing iOS tests
+        if: failure()
+        run: |
+          {
+            echo "## iOS 模拟器测试失败"
+            echo
+            echo '### Gradle 输出里的失败相关行'
+            echo '```'
+            grep -nE 'FAILED|AssertionError|Exception|^e: |Caused by' ios-test.log | head -60
+            echo '```'
+            echo
+            echo '### 失败用例（test-results XML）'
+            echo '```'
+            files=$(find shared/build/test-results -name '*.xml' 2>/dev/null)
+            if [ -n "$files" ]; then
+              grep -h -E '<testcase |<failure|<error' $files | head -100
+            else
+              echo "无 test-results 目录：任务在产出报告前就失败了（编译期/初始化期）"
+            fi
+            echo '```'
+            echo
+            echo '### 尾部输出'
+            echo '```'
+            tail -40 ios-test.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # 失败时把逐用例结果留成制品，否则只能看到 "Compilation finished with errors" 那一行
       - name: Upload iOS test results
@@ -75,7 +108,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ios-simulator-test-results
-          path: shared/build/test-results/
+          path: |
+            shared/build/test-results/
+            ios-test.log
           if-no-files-found: ignore
 
   version-matrix:
