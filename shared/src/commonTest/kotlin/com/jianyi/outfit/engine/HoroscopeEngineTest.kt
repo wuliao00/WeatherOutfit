@@ -1,6 +1,7 @@
 package com.jianyi.outfit.engine
 
 import com.jianyi.outfit.data.model.Horoscope
+import com.jianyi.outfit.data.today.HoroscopePool
 import com.jianyi.outfit.platform.CivilDate
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -73,6 +74,31 @@ class HoroscopeEngineTest {
             }
             d = next(d)
         }
+    }
+
+    /**
+     * 文案池形状守卫。
+     *
+     * 引擎按 `k = (signIndex*31 + doy) % POOL_SIZE`（POOL_SIZE=6）取条目，读的时候用
+     * `getOrNull(k) ?: return null`——所以某个星座被改成不足 6 条时，表现是那 1/6 的日子
+     * **整卡静默消失**，其余用例照样全绿。唯一能提前发现它的就是这条长度断言。
+     */
+    @Test
+    fun pool_has_six_entries_for_every_sign_in_every_dimension() {
+        val pools = mapOf(
+            "overall" to HoroscopePool.overall,
+            "love" to HoroscopePool.love,
+            "career" to HoroscopePool.career,
+            "wealth" to HoroscopePool.wealth
+        )
+        for ((label, pool) in pools) {
+            assertEquals(12, pool.size, "$label 应覆盖 12 星座，实到 ${pool.size}")
+            for ((sign, entries) in pool) {
+                assertEquals(6, entries.size, "$label/$sign 应为 6 条，实到 ${entries.size}")
+                assertTrue(entries.all { it.isNotBlank() }, "$label/$sign 存在空条目")
+            }
+        }
+        assertEquals(12, HoroscopePool.colors.size, "幸运色应覆盖 12 星座")
     }
 
     private fun next(c: CivilDate): CivilDate {

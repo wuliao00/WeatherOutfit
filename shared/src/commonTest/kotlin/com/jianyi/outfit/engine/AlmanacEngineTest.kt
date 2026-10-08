@@ -123,6 +123,37 @@ class AlmanacEngineTest {
         assertTrue(a.recommends.intersect(a.avoids.toSet()).isEmpty(), "同一事项不应既宜又忌")
     }
 
+    /**
+     * spec 8 节的防退化条：「宜忌非空且为已知词表子项」。
+     *
+     * 只断言 size<=3 / 非空 / 不相交拦不住真正担心的失败：tyme4kt 升级后 getRecommends() 若返回空，
+     * 卡片那行 `if (isNotEmpty())` 会让「宜」整行静默消失，全量测试仍然全绿。所以这里同时钉
+     * 非空与词表子集——上游改名或改输出格式（例如带上「:吉」后缀）会当场红。
+     * 四个日期取自本文件头部的勘察登记表，词表就是登记表里出现过的宜忌项全集。
+     */
+    @Test
+    fun taboo_items_are_non_empty_and_from_the_known_wordlist() {
+        val knownTabooTerms = setOf(
+            "祭祀", "沐浴", "修饰垣墙", "平治道涂", "馀事勿取", "破屋", "坏垣", "治病",
+            "嫁娶", "冠笄", "祈福", "求嗣", "雕刻", "开光", "安香", "出行", "入学", "修造",
+            "动土", "竖柱", "上梁", "盖屋", "起基", "安门", "出火", "移徙", "入宅", "掘井",
+            "造畜稠", "安葬", "破土", "除服", "成服", "纳采", "会亲友", "安机械", "安床",
+            "牧养", "畋猎", "斋醮", "开市", "订盟", "作灶", "造庙", "造船", "经络"
+        )
+        for (d in listOf(
+            CivilDate(2026, 10, 5), CivilDate(2026, 12, 22),
+            CivilDate(2027, 1, 1), CivilDate(2027, 2, 6)
+        )) {
+            val a = AlmanacEngine.of(d)!!
+            val label = "${d.year}-${d.month}-${d.day}"
+            assertTrue(a.recommends.isNotEmpty(), "$label 宜为空——上游输出形态变了")
+            assertTrue(a.avoids.isNotEmpty(), "$label 忌为空——上游输出形态变了")
+            for (t in a.recommends + a.avoids) {
+                assertTrue(t in knownTabooTerms, "$label 产出未知宜忌项「$t」，词表需重新勘察")
+            }
+        }
+    }
+
     @Test
     fun jieqi_and_festival_are_null_when_absent_and_set_on_known_days() {
         // 冬至/夏至是能独立核算的节气锚点：2026-12-22 为冬至、2026-06-21 为夏至
