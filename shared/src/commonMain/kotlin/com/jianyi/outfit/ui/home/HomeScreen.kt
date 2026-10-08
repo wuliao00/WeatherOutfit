@@ -75,6 +75,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.collectAsState
 import coil3.compose.AsyncImage
 import com.jianyi.outfit.data.model.AlmanacDay
+import com.jianyi.outfit.data.model.HistoricalEvent
 import com.jianyi.outfit.data.model.Horoscope
 import com.jianyi.outfit.data.model.TempUnit
 import com.jianyi.outfit.data.model.WeatherNow
@@ -115,8 +116,9 @@ fun HomeScreen(
     viewModel: HomeViewModel
 ) {
     val state by viewModel.uiState.collectAsState()
-    // 今日两张卡：值由 ViewModel 按设置开关置空；null 即不渲染，此处不再重复判开关
+    // 今日三张卡：值由 ViewModel 按设置开关置空；null 或空列表即不渲染，此处不再重复判开关
     val almanac by viewModel.almanac.collectAsState()
+    val historyToday by viewModel.historyToday.collectAsState()
     val horoscope by viewModel.horoscope.collectAsState()
     val controller = LocalSceneryController.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -191,6 +193,7 @@ fun HomeScreen(
                     else -> HomeContent(
                         state = state,
                         almanac = almanac,
+                        historyToday = historyToday,
                         horoscope = horoscope,
                         // 携带缓存 key 跳转：详情页从仓库读快照，全 app 无全局可变状态
                         onNavigateToDetail = {
@@ -369,6 +372,7 @@ private fun Modifier.spinWhileLoading(): Modifier {
 private fun HomeContent(
     state: HomeUiState,
     almanac: AlmanacDay?,
+    historyToday: List<HistoricalEvent>,
     horoscope: Horoscope?,
     onNavigateToDetail: () -> Unit,
     onSaveTemplate: () -> Unit,
@@ -508,13 +512,17 @@ private fun HomeContent(
         }
     }
 
-    // ===== 今日黄历 / 星座 =====
-    // 两张卡均为离线静态内容，随设置开关由 ViewModel 直接置空：null 即整卡不渲染。
+    // ===== 今日黄历 / 历史上的今天 / 星座 =====
+    // 三张卡均为离线静态内容，随设置开关由 ViewModel 直接置空：null 或空列表即整卡不渲染。
     // 每张卡前补 18.dp 间隔，与列默认行距叠加，把「今日信息」与上方天气主区分开一档；
     // 卡片内部自带来源角标，此处只做挂载、不写内容。
     almanac?.let {
         Spacer(Modifier.height(18.dp))
         AlmanacCard(day = it)
+    }
+    if (historyToday.isNotEmpty()) {
+        Spacer(Modifier.height(18.dp))
+        HistoryTodayCard(events = historyToday)
     }
     horoscope?.let {
         Spacer(Modifier.height(18.dp))

@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.jianyi.outfit.data.AppDependencies
 import com.jianyi.outfit.data.model.AlmanacDay
 import com.jianyi.outfit.data.model.ForecastDay
+import com.jianyi.outfit.data.model.HistoricalEvent
 import com.jianyi.outfit.data.model.Horoscope
 import com.jianyi.outfit.data.model.LifeIndex
 import com.jianyi.outfit.data.model.OutfitRecommendation
@@ -12,6 +13,7 @@ import com.jianyi.outfit.data.model.UserPreferences
 import com.jianyi.outfit.data.model.WeatherNow
 import com.jianyi.outfit.data.repository.RateLimitedException
 import com.jianyi.outfit.engine.AlmanacEngine
+import com.jianyi.outfit.engine.HistoryTodayEngine
 import com.jianyi.outfit.engine.HoroscopeEngine
 import com.jianyi.outfit.engine.LifeIndexEngine
 import com.jianyi.outfit.engine.OutfitRecommendationEngine
@@ -81,6 +83,13 @@ class HomeViewModel(private val deps: AppDependencies) : ViewModel() {
     /** 今日星座：语义与 [almanac] 相同，开关为 horoscopeCardEnabled */
     private val _horoscope = MutableStateFlow<Horoscope?>(null)
     val horoscope: StateFlow<Horoscope?> = _horoscope.asStateFlow()
+
+    /**
+     * 今日历史事件：语义与 [almanac] 相同，开关为 historyCardEnabled，关闭时为空列表。
+     * 数据集打进包，只 [HistoryTodayEngine.ensureLoaded] 一次并常驻，之后取数无 IO。
+     */
+    private val _historyToday = MutableStateFlow<List<HistoricalEvent>>(emptyList())
+    val historyToday: StateFlow<List<HistoricalEvent>> = _historyToday.asStateFlow()
 
     /** 已加载的数据源 key（与仓库缓存 key 同构），防止 Flow 重放触发重复请求；详情页复用其读缓存 */
     private var loadedKey: String? = null
@@ -155,11 +164,15 @@ class HomeViewModel(private val deps: AppDependencies) : ViewModel() {
             // 「今天」在收集开始时取一次：跨午夜不刷新是有意取舍；
             // 若放进 collect 内，每次偏好发射都会白算一遍同一个日期
             val today = todayCivilDate()
+            HistoryTodayEngine.ensureLoaded()
             deps.settingsRepository.preferences.collect { prefs ->
                 // 引擎是纯函数且无 IO，开关开合时直接重算即可，无需缓存上次结果
                 _almanac.value = if (prefs.almanacCardEnabled) AlmanacEngine.of(today) else null
                 _horoscope.value =
                     if (prefs.horoscopeCardEnabled) HoroscopeEngine.of(today) else null
+                _historyToday.value = if (prefs.historyCardEnabled) {
+                    HistoryTodayEngine.eventsFor(today.month, today.day)
+                } else emptyList()
             }
         }
     }
