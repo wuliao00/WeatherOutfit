@@ -79,41 +79,28 @@ jobs:
         if: failure()
         run: |
           set -u
-          {
-            echo "## iOS 模拟器测试失败"
-            echo
-            echo '### Gradle 输出里的失败相关行'
-            echo '```'
-            grep -nE 'FAILED|AssertionError|Exception|^e: |Caused by' ios-test.log | head -60 || true
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY" || true
+          # 只发 Kotlin 编译错误行。理由：GitHub 对每个 check run 的 annotation 有数量上限，
+          # 上一版先发 26 行 "What went wrong" 再发错误行，结果错误行被截断、一条都读不到。
+          # 现在 e: 行优先、最多 10 条，其它诊断一律走 job summary（人要看得去 UI，机器读不到）。
+          grep -nE '^e: ' ios-test.log | head -10 | cut -c1-250 \
+            | while IFS= read -r l; do echo "::error::KT $l"; done
 
           files=$(find shared/build/test-results -name '*.xml' 2>/dev/null || true)
-
-          # 上一版把关键行印进了 job summary（API 读不到），只发出去了几条 Gradle 内部栈帧。
-          # 教训：能匿名读的只有 annotation，所以「原因行」必须自己走 ::error:: 发出来。
-          # 顺序也重要：先说原因，再列用例，最后才是尾部噪音。
-          echo "::error::== What went wrong（含其后 25 行）=="
-          awk '/What went wrong/{f=1} f{print} f&&n++>25{exit}' ios-test.log \
-            | cut -c1-300 | while IFS= read -r l; do echo "::error::WWW $l"; done
-
-          echo "::error::== 命中行（Kotlin 编译错误 e: / Caused by / FAILED / 链接与模拟器关键词）=="
-          grep -nE '^e: |^w: .*(Test|test)|Caused by|FAILED|Could not|Unresolved|Exception|error: |linkDebugTest|link.*Test|simctl|Unable to|No such|not found' ios-test.log \
-            | head -35 | cut -c1-300 | while IFS= read -r l; do echo "::error::HIT $l"; done
-
           if [ -n "$files" ]; then
-            echo "::error::test-results 已产出，以下列出用例与失败信息"
-            grep -h -o '<testcase name="[^"]*" classname="[^"]*"' $files | head -45 \
-              | sed 's/<testcase name="//; s/" classname="/ @ /; s/"$//' \
-              | while IFS= read -r line; do echo "::notice::CASE $line"; done
-            grep -h -o '<failure[^>]*message="[^"]*"' $files | head -20 \
-              | sed 's/.*message="//; s/"$//' | cut -c1-400 \
+            grep -h -o '<failure[^>]*message="[^"]*"' $files | head -8 \
+              | sed 's/.*message="//; s/"$//' | cut -c1-250 \
               | while IFS= read -r line; do echo "::error::FAIL $line"; done
           else
-            echo "::error::无 test-results（任务在产出报告前就失败了）——附日志尾部 80 行"
-            tail -80 ios-test.log | cut -c1-300 \
+            tail -6 ios-test.log | cut -c1-250 \
               | while IFS= read -r line; do echo "::error::LOG $line"; done
           fi
+
+          {
+            echo "## iOS 模拟器测试失败"
+            echo '```'
+            awk '/What went wrong/{f=1} f{print} f&&n++>25{exit}' ios-test.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY" || true
 
       # 失败时把逐用例结果留成制品，否则只能看到 "Compilation finished with errors" 那一行
       - name: Upload iOS test results
