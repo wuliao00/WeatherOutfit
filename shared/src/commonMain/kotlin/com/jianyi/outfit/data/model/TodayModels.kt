@@ -11,10 +11,18 @@ package com.jianyi.outfit.data.model
  * 「不把估算包装成官方数据」这条规矩由编译器而非纪律保证。
  */
 
-/** 农历黄历一日 */
+/**
+ * 农历黄历一日。
+ *
+ * [ganzhiYear]、[duty]、[chongSha] 当前**不被 `AlmanacCard` 渲染**，只由引擎产出并被单测消费：
+ * 卡面已有农历整写、干支纪日、生肖、节气、宜忌、月相，再排建除与冲煞会把 12–14sp 的小字挤成一坨。
+ * 留着它们是因为展开态与节气专题是已定的下一步；删掉就得把冲煞那套非平凡算法的锚点核对重做一遍。
+ * 改这三个字段时请连同 `AlmanacEngineTest` 一起改——否则唯一的用户可见反馈是零。
+ */
 data class AlmanacDay(
     /** 农历日期整写，形如「农历丙午年八月廿五」；必须含月名，不能是裸日名（LunarDay.getName() 只有日名） */
     val lunarDateText: String,
+    /** 年柱干支，按春节换年（Ruling 14）；卡面不显示，农历整写里已含同年柱 */
     val ganzhiYear: String,
     val ganzhiDay: String,
     val zodiac: String,
@@ -24,9 +32,9 @@ data class AlmanacDay(
     val recommends: List<String>,
     /** 忌。已截断到展示上限 */
     val avoids: List<String>,
-    /** 建除十二值，如「建」「除」 */
+    /** 建除十二值，如「建」「除」（卡面当前不显示） */
     val duty: String,
-    /** 冲煞描述，如「冲马(丙午)煞南」 */
+    /** 冲煞描述，如「冲马(丙午)煞南」（卡面当前不显示） */
     val chongSha: String,
     /** 月相，如「朔」「望」 */
     val moonPhase: String,
@@ -42,6 +50,12 @@ data class AlmanacDay(
 
 /** 历史上的今天单条事件 */
 data class HistoricalEvent(
+    /**
+     * 年份；公元前用**负数**（-106 = 公元前 106 年），UI 侧据此转「公元前 N」。
+     *
+     * 数据集当前最老是 -106，没有 0 年条目；若将来补进 0，卡片会渲染成「公元前0」，
+     * 那时要一并改这里的换算而不是只加数据。
+     */
     val year: Int,
     /** 事件描述，本项目独立撰写（见 spec 3.2） */
     val summary: String,

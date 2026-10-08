@@ -5,7 +5,8 @@ import kotlinx.coroutines.flow.Flow
 /**
  * 平台偏好存储的最小面 —— 让设置仓库的实现能留在 commonMain。
  *
- * 值域刻意限死在 String / Boolean / Int 三种：这正是现有 16 个键全部用到的类型，
+ * 值域刻意限死在 String / Boolean / Int 三种：这是现有全部键用到的类型（键数会随功能增长，
+ * 所以这里不写死个数，避免注释与实现对不上），
  * 也刚好是 DataStore 与 NSUserDefaults 的公共子集。不多不少是有原因的 ——
  * 一旦放 Long 进来，Android 侧对应字段会从 int32 变成 int64，老用户升级后
  * 读不回原值；而 DataStore 的读取异常是被 `catch { emit(emptyPreferences()) }`

@@ -107,6 +107,10 @@ def main():
             errs.append(f"{day} #{i} type={t} 非法（1 事件 / 2 出生 / 3 逝世）")
         if y > LAST_WRITABLE_YEAR:
             errs.append(f"{day} #{i} 未来年份 y={y}（撰写于 {LAST_WRITABLE_YEAR} 年，更晚的年份必是编造）")
+        # 公元前的年份用负数，UI 按「公元前 |y|」渲染；0 会渲染成「公元前0」这种两种纪年法都不认的串，
+        # 而且没有 0 年，出现即必是笔误
+        if y == 0:
+            errs.append(f"{day} #{i} y=0 非法（无公元 0 年；公元前请用负数）")
         if not isinstance(s, str) or not s.strip():
             errs.append(f"{day} #{i} 描述为空或非字符串")
             continue

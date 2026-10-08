@@ -44,7 +44,8 @@ fun HistoryTodayCard(events: List<HistoricalEvent>, modifier: Modifier = Modifie
         }
         events.forEach { e ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                // 数据集最老到 -4713：负号直接打印会被读成负数而非纪年，一律转「公元前 N」
+                // 公元前的年份在数据集里以负数存（约定见 HistoricalEvent.year 的 KDoc）：
+                // 负号直接打印会被读成负数而非纪年，一律转「公元前 N」
                 Text(
                     text = if (e.year > 0) "${e.year}" else "公元前${-e.year}",
                     style = MaterialTheme.typography.labelMedium,
