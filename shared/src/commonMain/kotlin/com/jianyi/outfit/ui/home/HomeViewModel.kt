@@ -164,13 +164,15 @@ class HomeViewModel(private val deps: AppDependencies) : ViewModel() {
             // 「今天」在收集开始时取一次：跨午夜不刷新是有意取舍；
             // 若放进 collect 内，每次偏好发射都会白算一遍同一个日期
             val today = todayCivilDate()
-            HistoryTodayEngine.ensureLoaded()
             deps.settingsRepository.preferences.collect { prefs ->
                 // 引擎是纯函数且无 IO，开关开合时直接重算即可，无需缓存上次结果
                 _almanac.value = if (prefs.almanacCardEnabled) AlmanacEngine.of(today) else null
                 _horoscope.value =
                     if (prefs.horoscopeCardEnabled) HoroscopeEngine.of(today) else null
+                // 数据集 93KB / 1098 条，只在开关打开时才读并解析（spec 5 节：开关为关时不计算也不组合）。
+                // 也不能放在 collect 之前：那样会用它挡住另两张卡的首帧，而它默认是关的。
                 _historyToday.value = if (prefs.historyCardEnabled) {
+                    HistoryTodayEngine.ensureLoaded()
                     HistoryTodayEngine.eventsFor(today.month, today.day)
                 } else emptyList()
             }

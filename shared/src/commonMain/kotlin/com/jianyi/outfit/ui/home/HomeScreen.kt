@@ -516,17 +516,39 @@ private fun HomeContent(
     // 三张卡均为离线静态内容，随设置开关由 ViewModel 直接置空：null 或空列表即整卡不渲染。
     // 每张卡前补 18.dp 间隔，与列默认行距叠加，把「今日信息」与上方天气主区分开一档；
     // 卡片内部自带来源角标，此处只做挂载、不写内容。
+    // 面板与首页其余内容卡同参：卡片是 12–14sp 的小字，裸文本压在浅色风景图上会掉对比度。
     almanac?.let {
         Spacer(Modifier.height(18.dp))
-        AlmanacCard(day = it)
+        GlassSurface(
+            modifier = Modifier.fillMaxWidth(),
+            emphasis = GlassEmphasis.REGULAR,
+            dark = dark,
+            role = GlassRole.CARD
+        ) {
+            AlmanacCard(day = it)
+        }
     }
     if (historyToday.isNotEmpty()) {
         Spacer(Modifier.height(18.dp))
-        HistoryTodayCard(events = historyToday)
+        GlassSurface(
+            modifier = Modifier.fillMaxWidth(),
+            emphasis = GlassEmphasis.REGULAR,
+            dark = dark,
+            role = GlassRole.CARD
+        ) {
+            HistoryTodayCard(events = historyToday)
+        }
     }
     horoscope?.let {
         Spacer(Modifier.height(18.dp))
-        HoroscopeCard(h = it)
+        GlassSurface(
+            modifier = Modifier.fillMaxWidth(),
+            emphasis = GlassEmphasis.REGULAR,
+            dark = dark,
+            role = GlassRole.CARD
+        ) {
+            HoroscopeCard(h = it)
+        }
     }
 
     // ===== 七日预报 =====
