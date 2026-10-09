@@ -2,6 +2,7 @@ package com.jianyi.outfit.platform
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * epoch day ↔ 年月日 的往返测试（commonTest ⇒ Android 与 iOS 各跑一遍）。
@@ -40,8 +41,10 @@ class CivilDateRoundTripTest {
         var e = epochDayFromCivil(2026, 1, 1)
         while (e <= epochDayFromCivil(2026, 12, 31)) {
             val c = civilFromEpochDay(e)
-            assert(c.month in 1..12) { "月份应 1~12，实到 ${c.month}" }
-            assert(c.day in 1..31) { "日应 1~31，实到 ${c.day}" }
+            // 用 kotlin.test.assertTrue 而不是 stdlib 的 assert()：后者在 Kotlin/Native 上
+            // 被标成 @ExperimentalNativeApi，commonTest 一编 iOS 就因缺 opt-in 报错（CI 实测）。
+            assertTrue(c.month in 1..12, "月份应 1~12，实到 ${c.month}")
+            assertTrue(c.day in 1..31, "日应 1~31，实到 ${c.day}")
             assertEquals(e, epochDayFromCivil(c.year, c.month, c.day))
             e++
         }
