@@ -64,6 +64,7 @@ import com.jianyi.outfit.data.model.TempUnit
 import com.jianyi.outfit.data.model.ToleranceLevel
 import com.jianyi.outfit.data.model.WindUnit
 import com.jianyi.outfit.data.repository.ApiCredentials
+import com.jianyi.outfit.platform.installedVersionName
 import com.jianyi.outfit.ui.glass.GlassEmphasis
 import com.jianyi.outfit.ui.glass.GlassIconButton
 import com.jianyi.outfit.ui.glass.GlassRole
@@ -336,7 +337,9 @@ fun SettingsScreen(
             // ===== 关于 =====
             Section("关于") {
                 TextButtonRow("重新查看使用须知", viewModel::resetDisclaimer)
-                TextButtonRow("版本 2.0.0", null)
+                // 版本名向安装包要而不是写字面量：这里写死过一次，结果一路没跟上（界面 2.0.0，包已 2.2.0）。
+                val versionName = installedVersionName()
+                TextButtonRow(if (versionName == null) "版本未知" else "版本 $versionName", null)
                 Text(
                     text = "生活指数与紫外线等级由本地规则估算，不是官方发布值。",
                     style = MaterialTheme.typography.labelSmall,
