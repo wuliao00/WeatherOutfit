@@ -19,7 +19,7 @@
 - `docs/content/today-history-style.md`：今日历史事件撰写规范。
 
 ### Changed
-- 天气缓存拆分至独立数据库文件 `weather_cache.db`，云备份与设备迁移按文件排除缓存（Room schema 同步导出至 `app/schemas/`，业务库升级至 v2）。
+- 天气缓存拆分至独立数据库文件 `weather_cache.db`，云备份与设备迁移按文件排除缓存（Room schema 同步导出至 `shared/schemas/`，业务库升级至 v2）。
 - 缓存表新增过期清理：保留 7 天内的过期数据作弱网 / 限流回退，超期在每次写入缓存后自动删除。
 - 城市切换的「查重 → 插入 → 清标记 → 设当前」多步写改为 Room 事务，保证原子性。
 - 仓库层抽象出接口（Weather / City / Settings / Template），ViewModel 依赖抽象，便于 JVM 单测。
