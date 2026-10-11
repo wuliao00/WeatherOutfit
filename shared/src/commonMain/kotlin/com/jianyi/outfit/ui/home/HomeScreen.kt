@@ -14,12 +14,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -59,11 +62,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.foundation.Image
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import org.jetbrains.compose.resources.painterResource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
@@ -129,6 +136,21 @@ fun HomeScreen(
     val collapse: MutableFloatState = remember { mutableFloatStateOf(0f) }
     var showPicker by rememberSaveable { mutableStateOf(false) }
 
+    // 悬浮顶栏的底边（相对滚动内容顶部）。两个地方必须用同一个数：顶部占位的高度，
+    // 和「正文不许画到哪儿」的裁切线。各写各的就会出现静止时第一张卡的头几像素
+    // 已经落在栏底下 —— 真机 2026-10-11 实测写死的 62dp 比实际栏底矮 9px。
+    // 两边都量窗口坐标再相减，Padding 怎么改都不会错位。
+    var topBarBottomPx by remember { mutableIntStateOf(0) }
+    var contentTopPx by remember { mutableIntStateOf(0) }
+    // 首帧还没量到时退回改动前的几何，避免开屏一帧的跳变。
+    // 状态栏高度只能用 asPaddingValues() 取：getTop(density) 是 Android 源集的 API，commonMain 编不过。
+    val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val overlayBottomPx = if (topBarBottomPx > 0) {
+        (topBarBottomPx - contentTopPx).coerceAtLeast(0)
+    } else {
+        with(density) { (statusBarTop + 62.dp).roundToPx() }
+    }
+
     // 首页「使用精确定位」的权限申请（IP 降级提示条触发）。
     // 「已授予就直接定位、否则弹窗、按结果分支」三步全在能力接口里，
     // 页面不碰 Manifest、也不碰 activity-result API —— 这样它才能进 commonMain。
@@ -156,7 +178,13 @@ fun HomeScreen(
         onDispose { controller?.scrollPx?.floatValue = 0f }
     }
 
-    Box(Modifier.fillMaxSize()) {
+    // 内容坐标系的原点取这一层（屏幕根 Box），不能取下面那个滚动 Column：
+    // 下拉刷新会把 Column 整体往下平移，跟着它量会让占位高度随手指缩水。
+    Box(
+        Modifier
+            .fillMaxSize()
+            .onGloballyPositioned { contentTopPx = it.boundsInWindow().top.roundToInt() }
+    ) {
         androidx.compose.material3.pulltorefresh.PullToRefreshBox(
             isRefreshing = state.isRefreshing,
             onRefresh = viewModel::refresh,
@@ -165,11 +193,21 @@ fun HomeScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    // 正文滚上去会从悬浮顶栏底下穿过去，而顶栏是半透明的玻璃：在没有实时模糊的
+                    // 设备上（Android < 12，本机 vivo 实测）栏体只剩静态着色，盖不住 —— 卡片文字
+                    // 透过栏体可读，亮度极差与栏外正文同级（2026-10-11 截图 37/40）。
+                    // 所以「盖住」不靠不透明度，改在栏底线把滚动内容裁掉：与模糊能力无关。
+                    // 位置必须在 verticalScroll 之前 —— 放到它后面裁的是内容坐标系，
+                    // 裁切线会跟着内容一起滚走。
+                    .drawWithContent {
+                        clipRect(bottom = overlayBottomPx.toFloat()) { this@drawWithContent.drawContent() }
+                    }
                     .verticalScroll(scroll)
                     .padding(horizontal = 18.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Spacer(Modifier.statusBarsPadding().height(62.dp))
+                // 与上面那条裁切线同源：静止时第一张卡恰好从栏底开始，不缺边也不重叠
+                Spacer(Modifier.height(with(density) { overlayBottomPx.toDp() }))
 
                 val rateLimitRetryIn = state.rateLimitRetryIn
                 when {
@@ -213,7 +251,8 @@ fun HomeScreen(
                 state = state,
                 onCityClick = onNavigateToCity,
                 onRefresh = viewModel::refresh,
-                onSettings = onNavigateToSettings
+                onSettings = onNavigateToSettings,
+                onBottomChanged = { topBarBottomPx = it }
             )
         }
 
@@ -244,7 +283,8 @@ private fun HomeTopBar(
     state: HomeUiState,
     onCityClick: () -> Unit,
     onRefresh: () -> Unit,
-    onSettings: () -> Unit
+    onSettings: () -> Unit,
+    onBottomChanged: (Int) -> Unit
 ) {
     val scenery = LocalScenery.current
     val dark = scenery.dark || isSystemInDarkTheme()
@@ -261,6 +301,8 @@ private fun HomeTopBar(
          * 需要本体色而不是「第二份模糊」来压住滚过来的正文，原因见 Glass.kt 文件头。 */
         Box(
             Modifier
+                // 报出去的是「玻璃胶囊的底边」，调用方拿它同时做顶部占位和裁切线
+                .onGloballyPositioned { onBottomChanged(it.boundsInWindow().bottom.roundToInt()) }
                 .matchParentSize()
                 .graphicsLayer { alpha = 0.10f + 0.90f * collapse.floatValue }
                 .glassMaterial(
