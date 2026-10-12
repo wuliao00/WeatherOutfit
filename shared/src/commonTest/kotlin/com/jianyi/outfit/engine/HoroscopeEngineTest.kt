@@ -79,12 +79,15 @@ class HoroscopeEngineTest {
     /**
      * 文案池形状守卫。
      *
-     * 引擎按 `k = (signIndex*31 + doy) % POOL_SIZE`（POOL_SIZE=6）取条目，读的时候用
-     * `getOrNull(k) ?: return null`——所以某个星座被改成不足 6 条时，表现是那 1/6 的日子
-     * **整卡静默消失**，其余用例照样全绿。唯一能提前发现它的就是这条长度断言。
+     * 引擎按 `(signIndex*31 + doy) % 池子长度` 取条目，读的时候用 `getOrNull ?: return null`
+     * ——所以某个星座被改成不足 6 条时，表现是那 1/6 的日子**整卡静默消失**，其余用例照样全绿。
+     * 唯一能提前发现它的就是这条长度断言。
+     *
+     * 刻意写成「≥6 且同一维度内 12 个星座等长」而不是「==6」：池子加长是好事（周期自动变长，
+     * 见 HoroscopeEngine 文件头），但同一维度里长短不一会让某些星座的日子取不到条目。
      */
     @Test
-    fun pool_has_six_entries_for_every_sign_in_every_dimension() {
+    fun pools_are_uniform_and_never_shrink_below_six() {
         val pools = mapOf(
             "overall" to HoroscopePool.overall,
             "love" to HoroscopePool.love,
@@ -93,12 +96,84 @@ class HoroscopeEngineTest {
         )
         for ((label, pool) in pools) {
             assertEquals(12, pool.size, "$label 应覆盖 12 星座，实到 ${pool.size}")
+            val sizes = pool.values.map { it.size }.toSet()
+            assertEquals(1, sizes.size, "$label 的 12 个星座池长度不一致：$sizes")
+            val n = sizes.single()
+            assertTrue(n >= 6, "$label 每池至少 6 条（少于此会让部分日子整卡消失），实到 $n")
             for ((sign, entries) in pool) {
-                assertEquals(6, entries.size, "$label/$sign 应为 6 条，实到 ${entries.size}")
                 assertTrue(entries.all { it.isNotBlank() }, "$label/$sign 存在空条目")
             }
         }
         assertEquals(12, HoroscopePool.colors.size, "幸运色应覆盖 12 星座")
+    }
+
+    /**
+     * 轮回周期＝池子长度（文件头那条取舍的可执行版本）。
+     *
+     * 走满一个周期，断言周期内不重复、第 池长 天回到同一槽位。谁把索引改成带跳步
+     * （旧版幸运数就是 `doy*3` 那种），这条会红。
+     */
+    @Test
+    fun each_text_dimension_cycles_exactly_at_pool_size() {
+        val size = HoroscopePool.overall.getValue("白羊").size
+        var d = CivilDate(2026, 3, 1)
+        val seen = mutableListOf<String>()
+        repeat(size) { seen += HoroscopeEngine.of(d)!!.overall; d = next(d) }
+        assertEquals(size, seen.toSet().size, "一个周期内不该重复：$seen")
+        assertEquals(seen.first(), HoroscopeEngine.of(d)!!.overall, "第 $size 天应回到同一槽位")
+    }
+
+    /**
+     * 幸运线：幸运色 12 天一轮、幸运数 9 天一轮。
+     *
+     * 旧版幸运数是 `(… + doy*3) % 9 + 1`——模 9 下每步跨 3，实际只有 3 天一轮，
+     * 把整卡完全重复周期从 36 天压到 12 天（用户一周内就能撞见同一张卡）。
+     */
+    @Test
+    fun lucky_line_cycles_are_twelve_and_nine_days() {
+        var d = CivilDate(2026, 3, 1)
+        val colors = mutableListOf<String>()
+        val numbers = mutableListOf<Int>()
+        repeat(12) {
+            val h = HoroscopeEngine.of(d)!!
+            colors += h.luckyColor
+            numbers += h.luckyNumber
+            d = next(d)
+        }
+        assertEquals(12, colors.toSet().size, "幸运色应 12 天不重复：$colors")
+        assertEquals(9, numbers.take(9).toSet().size, "幸运数应 9 天不重复：${numbers.take(9)}")
+        assertEquals(numbers.first(), plusDays(CivilDate(2026, 3, 1), 9).let { HoroscopeEngine.of(it)!!.luckyNumber },
+            "第 9 天应回到第 1 天的幸运数")
+    }
+
+    /**
+     * 同一星座窗口内（最长 31 天）整卡逐字不重复。
+     *
+     * 三个周期分别是 6（四类文案）、12（幸运色）、9（幸运数），lcm = 36 > 31，
+     * 所以一个星座在其全部日子里都不会看到整卡重复；旧版 lcm(6,12,3)=12 < 31，
+     * 同一个星座窗口里必然出现两次一模一样的卡。
+     */
+    @Test
+    fun no_identical_card_within_one_sign_window() {
+        var d = CivilDate(2026, 1, 1)
+        var cards = mutableListOf<com.jianyi.outfit.data.model.Horoscope>()
+        var lastSign = ""
+        while (d.year == 2026) {
+            val h = HoroscopeEngine.of(d)!!
+            if (h.constellation != lastSign) {
+                cards = mutableListOf()
+                lastSign = h.constellation
+            }
+            assertTrue(cards.none { it == h }, "同一星座窗口内出现整卡重复：$h（$d）")
+            cards += h
+            d = next(d)
+        }
+    }
+
+    private fun plusDays(c: CivilDate, n: Int): CivilDate {
+        var d = c
+        repeat(n) { d = next(d) }
+        return d
     }
 
     private fun next(c: CivilDate): CivilDate {
