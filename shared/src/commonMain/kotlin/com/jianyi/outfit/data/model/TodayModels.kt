@@ -82,14 +82,16 @@ data class HistoricalEvent(
 
 /** 星座运势一日 */
 data class Horoscope(
-    /** 星座名，如「天秤座」 */
+    /** 星座名，两位短名（`tyme4kt` 原样给「天秤」），展示时由 UI 补「座」后缀 */
     val constellation: String,
     val overall: String,
     val love: String,
     val career: String,
     val wealth: String,
     val luckyColor: String,
-    val luckyNumber: Int
+    val luckyNumber: Int,
+    /** 本星座区间，形如「9月23日–10月23日」；由 tyme4kt 的星座边界扫出，与该卡当天显示的星座自洽 */
+    val signWindow: String
 ) {
     companion object {
         const val SOURCE_LABEL = "娱乐内容，非预测"

@@ -44,6 +44,16 @@ fun HoroscopeCard(h: Horoscope, modifier: Modifier = Modifier) {
             SourceBadge(text = Horoscope.SOURCE_LABEL)
         }
 
+        // 星座区间是这条卡里唯一的可核实事实（由 tyme4kt 的边界扫出），单独一行、弱化处理，
+        // 免得和下面四句自撰文案混成同一层级
+        if (h.signWindow.isNotBlank()) {
+            Text(
+                text = h.signWindow,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
         HoroscopeItem(prefix = "整体", text = h.overall)
         HoroscopeItem(prefix = "爱情", text = h.love)
         HoroscopeItem(prefix = "事业", text = h.career)

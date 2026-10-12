@@ -52,7 +52,8 @@ object HoroscopeEngine {
             wealth = pick(HoroscopePool.wealth[name], signIndex, doy) ?: return null,
             luckyColor = colors[(signIndex + doy) % colors.size],
             // 每步跨 1（原来是 doy*3，模 9 后实际 3 天一轮）：同一步长才配得上「9 天不重复」
-            luckyNumber = (signIndex * 7 + doy) % 9 + 1
+            luckyNumber = (signIndex * 7 + doy) % 9 + 1,
+            signWindow = windowOf(date, name)
         )
     }
 
@@ -65,6 +66,37 @@ object HoroscopeEngine {
     private fun pick(pool: List<String>?, signIndex: Int, doy: Int): String? =
         pool?.takeIf { it.isNotEmpty() }?.get((signIndex * 31 + doy) % pool.size)
 
+    /**
+     * 星座区间，形如「9月23日–10月23日」。
+     *
+     * tyme4kt 1.5.0 的 `Constellation` **没有**起止日期 API（只有 getName/next/fromName/fromIndex），
+     * 所以从当天前后扫库自己的边界：一直走到 `getConstellation()` 换人为止。这样显示的区间与
+     * 卡上那个星座**永远自洽**，不依赖任何"通用星座表"——实测 tyme4kt 的天秤是 9月23日–10月23日，
+     * 而通用表写的是到 10月22日，照抄通用表就和卡上的星座对不上了。
+     *
+     * 双向各最多走 40 天（真值 30~32 天），是防越界数据的护栏，不是业务上限。
+     */
+    private fun windowOf(date: CivilDate, sign: String): String {
+        var first = date
+        var guard = 0
+        while (guard++ < 40) {
+            val prev = plusDays(first, -1)
+            if (signNameOf(prev) != sign) break
+            first = prev
+        }
+        var last = date
+        guard = 0
+        while (guard++ < 40) {
+            val next = plusDays(last, 1)
+            if (signNameOf(next) != sign) break
+            last = next
+        }
+        return "${first.month}月${first.day}日–${last.month}月${last.day}日"
+    }
+
+    private fun signNameOf(c: CivilDate): String? =
+        runCatching { SolarDay(c.year, c.month, c.day).getConstellation().getName() }.getOrNull()
+
     /** 与 tyme4kt 1.5.0 Constellation.NAMES 逐字对齐（两位短名，无「座」后缀） */
     private val SIGN_ORDER = listOf(
         "白羊", "金牛", "双子", "巨蟹", "狮子", "处女",
@@ -72,8 +104,29 @@ object HoroscopeEngine {
     )
 
     private fun dayOfYear(c: CivilDate): Int {
-        val mdays = intArrayOf(31, if ((c.year % 4 == 0 && c.year % 100 != 0) || c.year % 400 == 0) 29 else 28,
-            31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+        val mdays = monthDays(c.year)
         return (1 until c.month).sumOf { mdays[it - 1] } + c.day
+    }
+
+    private fun monthDays(year: Int): IntArray =
+        intArrayOf(31, if ((year % 4 == 0 && year % 100 != 0) || year % 400 == 0) 29 else 28,
+            31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+
+    /** 日期加减（跨月跨年），只用于扫星座边界，不做通用日期库 */
+    private fun plusDays(c: CivilDate, delta: Int): CivilDate {
+        var y = c.year
+        var m = c.month
+        var d = c.day + delta
+        while (d < 1) {
+            m--
+            if (m < 1) { m = 12; y-- }
+            d += monthDays(y)[m - 1]
+        }
+        while (d > monthDays(y)[m - 1]) {
+            d -= monthDays(y)[m - 1]
+            m++
+            if (m > 12) { m = 1; y++ }
+        }
+        return CivilDate(y, m, d)
     }
 }

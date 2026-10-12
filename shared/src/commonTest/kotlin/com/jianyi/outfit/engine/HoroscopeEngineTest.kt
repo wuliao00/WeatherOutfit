@@ -170,6 +170,25 @@ class HoroscopeEngineTest {
         }
     }
 
+    /**
+     * 星座区间按 tyme4kt **自己的边界**扫出来，不是抄通用星座表。
+     *
+     * 两者的差别就在天秤：库给的结束日是 10月23日，通用表写 10月22日——照抄通用表会与
+     * 卡上当天显示的星座打架（10月23日库仍判天秤）。下面四个锚点 + 一个跨年窗口 + 一个闰日
+     * 全是跑 1.5.0 的 aar 实测出来的。
+     */
+    @Test
+    fun sign_window_is_scanned_from_library_boundaries() {
+        assertEquals("9月23日–10月23日", HoroscopeEngine.of(CivilDate(2026, 10, 12))!!.signWindow)
+        assertEquals("2月19日–3月20日", HoroscopeEngine.of(CivilDate(2026, 3, 1))!!.signWindow)
+        assertEquals("5月21日–6月21日", HoroscopeEngine.of(CivilDate(2026, 6, 15))!!.signWindow)
+        // 跨年窗口：摩羯 12月22日 → 次年 1月19日
+        assertEquals("12月22日–1月19日", HoroscopeEngine.of(CivilDate(2026, 1, 5))!!.signWindow)
+        assertEquals("12月22日–1月19日", HoroscopeEngine.of(CivilDate(2026, 12, 31))!!.signWindow)
+        // 闰日仍在双鱼窗口内
+        assertEquals("2月19日–3月20日", HoroscopeEngine.of(CivilDate(2024, 2, 29))!!.signWindow)
+    }
+
     private fun plusDays(c: CivilDate, n: Int): CivilDate {
         var d = c
         repeat(n) { d = next(d) }
