@@ -32,10 +32,22 @@ data class AlmanacDay(
     val recommends: List<String>,
     /** 忌。已截断到展示上限 */
     val avoids: List<String>,
-    /** 建除十二值，如「建」「除」（卡面当前不显示） */
+    /** 建除十二值，如「收」「开」（2026-10-12 实测「收」） */
     val duty: String,
-    /** 冲煞描述，如「冲马(丙午)煞南」（卡面当前不显示） */
+    /** 冲煞描述，形如「冲牛(癸丑)煞西」（2026-10-12 实测值） */
     val chongSha: String,
+    /** 值神（黄道黑道十二神）之名，如「朱雀」「金匮」（2026-10-12 实测「朱雀」） */
+    val twelveStar: String,
+    /** 当日属黄道还是黑道，取值为「黄道」/「黑道」（2026-10-12 实测「黑道」） */
+    val ecliptic: String,
+    /** 二十八宿之名，单字，如「张」「翼」（2026-10-12 实测「张」） */
+    val twentyEightStar: String,
+    /** 二十八宿的吉凶，取值为「吉」/「凶」（2026-10-12 实测「吉」，10-13 实测「凶」） */
+    val twentyEightStarLuck: String,
+    /** 吉神方位，如「南」「北」（2026-10-12 实测「南」） */
+    val jupiterDirection: String,
+    /** 胎神占方，如「占门厕 外正东」（2026-10-12 实测值，中间那个空格是原样） */
+    val fetusDay: String,
     /** 月相，如「朔」「望」 */
     val moonPhase: String,
     val festival: String?

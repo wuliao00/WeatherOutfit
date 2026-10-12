@@ -179,6 +179,32 @@ class AlmanacEngineTest {
     }
 
     @Test
+    fun day_star_facts_match_the_surveyed_values() {
+        // 值日/值神(含黄道黑道)/二十八宿/吉神方位/胎神六项的取值，是用 tyme4kt 1.5.0 的
+        // android aar（classes.jar）直接跑出来登记的，不是照文档猜的：
+        //   2026-10-12 收／朱雀·黑道／张·吉／南／占门厕 外正东／冲牛(癸丑)煞西
+        //   2026-10-13 开／金匮·黄道／翼·凶／南／碓磨炉 外东南
+        // 三套标注（建除、十二神、二十八宿）互相独立，所以三联锚必须取自同一天。
+        val d = assertNotNull(AlmanacEngine.of(CivilDate(2026, 10, 12)), "2026-10-12")
+        assertEquals("收", d.duty)
+        assertEquals("朱雀", d.twelveStar)
+        assertEquals("黑道", d.ecliptic)
+        assertEquals("张", d.twentyEightStar)
+        assertEquals("吉", d.twentyEightStarLuck)
+        assertEquals("南", d.jupiterDirection)
+        assertEquals("占门厕 外正东", d.fetusDay, "胎神占方里那个空格是库的原样，别顺手 trim 掉")
+        assertEquals("冲牛(癸丑)煞西", d.chongSha, "第三个冲煞锚点，与前两个锚点同源同格式")
+
+        val n = assertNotNull(AlmanacEngine.of(CivilDate(2026, 10, 13)), "2026-10-13")
+        assertEquals("开", n.duty)
+        assertEquals("金匮", n.twelveStar)
+        assertEquals("黄道", n.ecliptic)
+        assertEquals("翼", n.twentyEightStar)
+        assertEquals("凶", n.twentyEightStarLuck, "次日宿吉凶翻面，用来挡「拿了缓存/同一天的值」")
+        assertEquals("碓磨炉 外东南", n.fetusDay)
+    }
+
+    @Test
     fun year_pillar_switches_at_lunar_new_year_not_at_lichun() {
         // 口径钉死：干支年/生肖随**春节**换（民俗口径），不随立春换（命理口径）。
         // 2027 立春（02-04）早于春节（02-06），这两天是两种口径的分歧窗口：

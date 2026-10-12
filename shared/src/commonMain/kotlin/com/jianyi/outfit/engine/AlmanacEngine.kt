@@ -43,6 +43,14 @@ object AlmanacEngine {
             avoids = avoids.take(AlmanacDay.TABOO_DISPLAY_LIMIT),
             duty = lunar.getDuty().getName(),
             chongSha = chongShaOf(lunar),
+            // 下面六个字段全部由 tyme4kt 1.5.0 原样给出，取值已按「勘察登记表」的规矩逐日实测
+            // （2026-10-12：收／朱雀·黑道／张·吉／南／占门厕 外正东；10-13：开／金匮·黄道／翼·凶）
+            twelveStar = lunar.getTwelveStar().getName(),
+            ecliptic = lunar.getTwelveStar().getEcliptic().getName(),
+            twentyEightStar = lunar.getTwentyEightStar().getName(),
+            twentyEightStarLuck = lunar.getTwentyEightStar().getLuck().getName(),
+            jupiterDirection = lunar.getJupiterDirection().getName(),
+            fetusDay = lunar.getFetusDay().getName(),
             moonPhase = lunar.getPhase().getName(),
             festival = lunar.getFestival()?.getName()
         )
