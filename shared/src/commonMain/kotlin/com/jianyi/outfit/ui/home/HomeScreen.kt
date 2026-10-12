@@ -197,10 +197,12 @@ fun HomeScreen(
                     // 设备上（Android < 12，本机 vivo 实测）栏体只剩静态着色，盖不住 —— 卡片文字
                     // 透过栏体可读，亮度极差与栏外正文同级（2026-10-11 截图 37/40）。
                     // 所以「盖住」不靠不透明度，改在栏底线把滚动内容裁掉：与模糊能力无关。
+                    // 注意 clipRect 是「保留」而非「挖掉」给定的矩形：想挖掉 0..栏底，
+                    // 要传的是 top（第一次写成 bottom，结果整页正文被裁掉、栏里反倒留了一条）。
                     // 位置必须在 verticalScroll 之前 —— 放到它后面裁的是内容坐标系，
                     // 裁切线会跟着内容一起滚走。
                     .drawWithContent {
-                        clipRect(bottom = overlayBottomPx.toFloat()) { this@drawWithContent.drawContent() }
+                        clipRect(top = overlayBottomPx.toFloat()) { this@drawWithContent.drawContent() }
                     }
                     .verticalScroll(scroll)
                     .padding(horizontal = 18.dp),
