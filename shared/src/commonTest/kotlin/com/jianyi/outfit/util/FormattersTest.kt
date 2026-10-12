@@ -36,4 +36,21 @@ class FormattersTest {
             Formatters.dailyPushText("晴，适合薄外套。", mine())
         )
     }
+
+    /**
+     * 预报日期要同时容忍 “-” 与 “/”。
+     *
+     * 接口 day=7 的逐日日期给的是 “2026/10/13”，而标签/短日期历史上只认短横线：
+     * 只认一种的后果不是报错，是把整串原样画到卡片上、在窄列里被挤掉（真机实测显示成 “2026/1”）。
+     */
+    @Test
+    fun 预报日期容忍斜杠分隔() {
+        assertEquals("1/1", Formatters.forecastDateShort("2099/01/01"))
+        assertEquals("1/1", Formatters.forecastDateShort("2099-01-01"))
+        assertEquals(
+            Formatters.forecastDayLabel("2099-01-01"),
+            Formatters.forecastDayLabel("2099/01/01"),
+            "同一日期两种分隔符必须得到同一个标签"
+        )
+    }
 }

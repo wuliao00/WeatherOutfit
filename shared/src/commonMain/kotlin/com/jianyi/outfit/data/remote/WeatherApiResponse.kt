@@ -56,8 +56,18 @@ data class WeatherResponse(
     val uptime: String? = null,          // 数据更新时间
     val nowinfo: NowInfo? = null,        // 实况信息
     val alarm: List<AlarmItem>? = null,  // 气象预警列表
-    // 以下为 day=7 时返回的 7 天预报，格式为竖线分隔字符串：
-    // 日期|天气|最低温|最高温|风向|风力
+    // day=7 时的逐日预报。**实测（2026-10-12）接口已不返回 day1~day7 竖线串**，
+    // 改在 weatherday2..weatherday7 里结构化下发（今日数据在顶层 weather1/wd1/windleve1，
+    // 所以逐日数组从**明天**开始）。下面 day1~day7 保留作兜底：缓存里可能还有老行，
+    // 也不能排除别的端点仍给这种形态。字段名与取值见 DayForecast 的注释。
+    val weatherday1: DayForecast? = null,
+    val weatherday2: DayForecast? = null,
+    val weatherday3: DayForecast? = null,
+    val weatherday4: DayForecast? = null,
+    val weatherday5: DayForecast? = null,
+    val weatherday6: DayForecast? = null,
+    val weatherday7: DayForecast? = null,
+    /** @deprecated 旧形态（竖线串「日期|天气|最低温|最高温|风向|风力」），接口已不返回，仅作兜底 */
     val day1: String? = null,
     val day2: String? = null,
     val day3: String? = null,
@@ -66,6 +76,33 @@ data class WeatherResponse(
     val day6: String? = null,
     val day7: String? = null
 ) : WeatherEnvelope
+
+/**
+ * day=7 时接口逐日返回的预报元素。
+ *
+ * 字段名与取值来自 2026-10-12 对 `tqyb.php?sheng=广东省&place=湛江市&day=7` 的实测登记：
+ * ```
+ * "weatherday2":{"date":"2026/10/13","weekday":"星期二","monthDay":"10/13",
+ *   "weather1":"晴","weather2":"晴","wd1":32,"wd2":24,
+ *   "winddirection1":"无持续风向","winddirection2":"无持续风向",
+ *   "windleve1":"微风","windleve2":"微风","weather1img":"…","weather2img":"…"}
+ * ```
+ * `wd1` 是**最高温**、`wd2` 是最低温（与顶层 weather1/wd1/wd2 同义），且接口给的是数字。
+ */
+@Serializable
+data class DayForecast(
+    val date: String? = null,
+    val weekday: String? = null,
+    val monthDay: String? = null,
+    val weather1: String? = null,
+    val weather2: String? = null,
+    val wd1: Int? = null,
+    val wd2: Int? = null,
+    val winddirection1: String? = null,
+    val winddirection2: String? = null,
+    val windleve1: String? = null,
+    val windleve2: String? = null
+)
 
 /**
  * 经纬度端点（tqybjw1.php）响应 DTO。

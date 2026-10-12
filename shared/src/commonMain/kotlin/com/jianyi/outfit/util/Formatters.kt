@@ -82,7 +82,7 @@ object Formatters {
     /** 预报日期 → “9/22”，画在星期下面做辅助信息 */
     fun forecastDateShort(date: String?): String {
         if (date.isNullOrBlank()) return ""
-        val parts = date.split("-")
+        val parts = if ('/' in date) date.split("/") else date.split("-")
         val m = parts.getOrNull(1)?.toIntOrNull()
         val d = parts.getOrNull(2)?.toIntOrNull()
         return if (m != null && d != null) "$m/$d" else date
@@ -91,9 +91,16 @@ object Formatters {
     /** 摄氏 → 华氏 */
     private fun celsiusToFahrenheit(celsius: Double): Double = celsius * 9 / 5 + 32
 
-    /** “yyyy-MM-dd” → (年, 月, 日)；格式不对返回 null（调用方原样回显） */
+    /**
+     * “yyyy-MM-dd” → (年, 月, 日)；格式不对返回 null（调用方原样回显）。
+     *
+     * 分隔符同时收 “-” 与 “/”：接口在 day=7 的逐日数据里给的是 “2026/10/13”
+     * （见 WeatherApiResponse.DayForecast 的实测登记），而这里历史上只认 “-”。
+     * 只认一种的后果不是报错，是标签把这个整串原样画出来、在窄列里被挤掉 —— 真机上
+     * 就显示成了 “2026/1”。两处都容错比在某一层偷偷替换稳。
+     */
     private fun parseYmd(text: String): Triple<Int, Int, Int>? {
-        val parts = text.split("-")
+        val parts = if ('/' in text) text.split("/") else text.split("-")
         if (parts.size != 3) return null
         val y = parts[0].toIntOrNull() ?: return null
         val m = parts[1].toIntOrNull() ?: return null

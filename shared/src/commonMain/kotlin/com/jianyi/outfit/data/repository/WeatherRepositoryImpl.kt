@@ -234,10 +234,33 @@ fun WeatherResponse.toDomain(): WeatherNow {
     }
 }
 
-/** 解析 7 天预报：day1~day7 为“日期|天气|低温|高温|风向|风力”竖线分隔字符串 */
+/**
+ * 解析 7 天预报。
+ *
+ * **优先新形态**：`weatherday2`..`weatherday7` 结构化元素（2026-10-12 实测，接口已把逐日数据
+ * 从 day1~day7 竖线串挪到这里）。老形态的竖线串保留兜底——缓存里可能还有老行，也不能排除
+ * 别的端点/套餐仍给那种。两种都没有就返回空列表，交给 UI 说明原因，不猜。
+ */
 fun WeatherResponse.toForecast(): List<ForecastDay> {
-    val raw = listOf(day1, day2, day3, day4, day5, day6, day7).filterNotNull()
-    return raw.map { day ->
+    val structured = listOf(
+        weatherday1, weatherday2, weatherday3, weatherday4,
+        weatherday5, weatherday6, weatherday7
+    ).mapNotNull { it }
+    if (structured.isNotEmpty()) {
+        return structured.map { d ->
+            ForecastDay(
+                // 归一到 “yyyy-MM-dd”：接口给的是 “2026/10/13”，而日期标签/短日期都按
+                // 短横线解析，原样传下去会在卡片上把整串画出来
+                date = d.date?.replace('/', '-'),
+                condition = d.weather1?.takeIf { it.isNotBlank() },
+                lowTemp = d.wd2,
+                highTemp = d.wd1
+            )
+        }
+    }
+
+    // 兜底：day1~day7 为「日期|天气|低温|高温|风向|风力」竖线分隔字符串
+    return listOf(day1, day2, day3, day4, day5, day6, day7).filterNotNull().map { day ->
         val parts = day.split("|")
         ForecastDay(
             date = parts.getOrNull(0),

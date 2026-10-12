@@ -1,5 +1,6 @@
 package com.jianyi.outfit.data.remote
 
+import com.jianyi.outfit.data.repository.toForecast
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
@@ -49,6 +50,23 @@ class WeatherCacheCodecTest {
              "visibility":12000,"speed":3.4,"deg":135,"clouds":60,"country":"CN",
              "sunrise":1758500000,"sunset":1758544000,"name":"Zhongshan",
              "dt":1758516029}}
+        """
+
+        /**
+         * 2026-10-12 对 `tqyb.php?sheng=广东省&place=湛江市&day=7` 的**实测**响应片段：
+         * 逐日数据在 weatherday2..7 的结构化对象里，今日在顶层，**没有** day1~day7 竖线串。
+         */
+        const val MEASURED_DAY7_STYLE = """
+            {"code":200,"sheng":"广东省","shi":"湛江市","name":"湛江市",
+             "weather1":"晴","weather2":"晴","wd1":32,"wd2":24,
+             "winddirection1":"无持续风向","windleve1":"微风",
+             "uptime":"2026-10-12 12:00:29",
+             "weatherday2":{"date":"2026/10/13","weekday":"星期二","monthDay":"10/13",
+               "weather1":"晴","weather2":"晴","wd1":32,"wd2":24,
+               "winddirection1":"无持续风向","windleve1":"微风"},
+             "weatherday4":{"date":"2026/10/15","weekday":"星期四","monthDay":"10/15",
+               "weather1":"小雨","weather2":"小雨","wd1":30,"wd2":24,
+               "winddirection1":"东南风","windleve1":"3~4级"}}
         """
     }
 
@@ -155,5 +173,48 @@ class WeatherCacheCodecTest {
         assertEquals("latlon", root["type"]?.jsonPrimitive?.content)
         val back = assertIs<LatLonWeatherResponse>(WeatherCacheCodec.decode(payload))
         assertEquals(response, back)
+    }
+
+    /* ============ 7 天预报：接口在 2026-10 换了形态 ============ */
+
+    /**
+     * 实测形态必须能解出逐日列表。
+     *
+     * 老解析只认 day1~day7 竖线串，而接口现在给 weatherday2..7 —— 列表恒为空，
+     * 界面只能显示「接口未返回逐日数据，稍后下拉刷新可再试」。这条就是那个现象的可复现版本。
+     */
+    @Test
+    fun `measured weatherday shape parses into forecast days`() {
+        val r = assertIs<WeatherResponse>(WeatherCacheCodec.decode(MEASURED_DAY7_STYLE))
+        val days = r.toForecast()
+        assertEquals(2, days.size, "weatherday2 与 weatherday4 两条")
+        assertEquals("2026-10-13", days[0].date, "映射层把接口的斜杠日期归一到短横线（标签按短横线解析）")
+        assertEquals("晴", days[0].condition)
+        assertEquals(32, days[0].highTemp, "wd1 是最高温")
+        assertEquals(24, days[0].lowTemp, "wd2 是最低温")
+        assertEquals("2026-10-15", days[1].date)
+        assertEquals("小雨", days[1].condition)
+        assertEquals(30, days[1].highTemp)
+    }
+
+    /** 老竖线串仍要能解析：缓存里可能还留着老行，别的端点也可能仍给这种 */
+    @Test
+    fun `legacy pipe strings still parse as fallback`() {
+        val r = assertIs<WeatherResponse>(
+            WeatherCacheCodec.decode("""{"code":200,"day1":"2026/10/13|晴|24|32|无持续风向|微风"}""")
+        )
+        val days = r.toForecast()
+        assertEquals(1, days.size)
+        assertEquals("2026/10/13", days[0].date)
+        assertEquals("晴", days[0].condition)
+        assertEquals(24, days[0].lowTemp)
+        assertEquals(32, days[0].highTemp)
+    }
+
+    /** 两种形态都没有 → 空列表：不猜、不造数据，由 UI 说明原因 */
+    @Test
+    fun `neither shape yields an empty list`() {
+        val r = assertIs<WeatherResponse>(WeatherCacheCodec.decode("""{"code":200,"weather1":"晴"}"""))
+        assertTrue(r.toForecast().isEmpty())
     }
 }
