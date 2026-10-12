@@ -166,8 +166,22 @@ data class UserPreferences(
     /** 今日三卡开关：默认全关。升级不该给用户凭空加出内容 */
     val almanacCardEnabled: Boolean = false,
     val historyCardEnabled: Boolean = false,
-    val horoscopeCardEnabled: Boolean = false
+    val horoscopeCardEnabled: Boolean = false,
+    /* ---- 我的星座（生日）---- */
+    /**
+     * 出生月 / 出生日，0 表示未设置。
+     *
+     * 只存月份是**不够**的：星座跨月（10月23日仍是天秤、10月24日才是天蝎），
+     * 只填月份等于半个月出生的人会拿到错的星座。所以这里必须月+日成对存。
+     * 未设置（0）时卡片与推送退回「今天太阳所在的星座」的既有行为，不做猜测。
+     */
+    val birthMonth: Int = 0,
+    val birthDay: Int = 0
 ) {
+    /** 生日是否已填全（月 1~12 且日 1~31） */
+    val hasBirthday: Boolean
+        get() = birthMonth in 1..12 && birthDay in 1..31
+
     companion object {
         /** 每日推送默认时刻：早上 8 点 */
         const val DEFAULT_DAILY_PUSH_HOUR = 8

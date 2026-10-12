@@ -84,6 +84,16 @@ class SettingsRepositoryImpl(private val backend: PreferenceBackend) : SettingsR
 
     override suspend fun setHoroscopeCardEnabled(enabled: Boolean) = write(KEY_CARD_HOROSCOPE, enabled)
 
+    override suspend fun setBirthday(month: Int, day: Int) = backend.edit {
+        this[KEY_BIRTH_MONTH] = month.coerceIn(1, 12)
+        this[KEY_BIRTH_DAY] = day.coerceIn(1, 31)
+    }
+
+    override suspend fun clearBirthday() = backend.edit {
+        this[KEY_BIRTH_MONTH] = null
+        this[KEY_BIRTH_DAY] = null
+    }
+
     /* ============ 凭证与须知 ============ */
 
     /** 保存用户自填的 API 凭证；空白视为"未填"，删键以回退内置默认凭证 */
@@ -123,7 +133,10 @@ class SettingsRepositoryImpl(private val backend: PreferenceBackend) : SettingsR
         /* 今日三卡：没写过 = 关，与模型默认值一致 —— 老用户升级后不会凭空多出内容 */
         almanacCardEnabled = boolean(KEY_CARD_ALMANAC) ?: false,
         historyCardEnabled = boolean(KEY_CARD_HISTORY) ?: false,
-        horoscopeCardEnabled = boolean(KEY_CARD_HOROSCOPE) ?: false
+        horoscopeCardEnabled = boolean(KEY_CARD_HOROSCOPE) ?: false,
+        /* 生日：没写过 = 0 = 未设置，卡片与推送退回按当天太阳星座 */
+        birthMonth = int(KEY_BIRTH_MONTH) ?: 0,
+        birthDay = int(KEY_BIRTH_DAY) ?: 0
     )
 
     /**
@@ -159,5 +172,9 @@ class SettingsRepositoryImpl(private val backend: PreferenceBackend) : SettingsR
         internal const val KEY_CARD_ALMANAC = "card_almanac"
         internal const val KEY_CARD_HISTORY = "card_history"
         internal const val KEY_CARD_HOROSCOPE = "card_horoscope"
+
+        /** 生日（月/日，0=未设置）。只存月份定不了星座，故成对存 */
+        internal const val KEY_BIRTH_MONTH = "birth_month"
+        internal const val KEY_BIRTH_DAY = "birth_day"
     }
 }

@@ -167,8 +167,15 @@ class HomeViewModel(private val deps: AppDependencies) : ViewModel() {
             deps.settingsRepository.preferences.collect { prefs ->
                 // 引擎是纯函数且无 IO，开关开合时直接重算即可，无需缓存上次结果
                 _almanac.value = if (prefs.almanacCardEnabled) AlmanacEngine.of(today) else null
+                // 填过生日就按「我的星座」出内容；没填则退回当天太阳星座（既有行为）。
+                // 取星座在开关分支内算，关着的时候不做无用功
+                val mySign = if (prefs.hasBirthday) {
+                    HoroscopeEngine.signForBirthday(prefs.birthMonth, prefs.birthDay)
+                } else {
+                    null
+                }
                 _horoscope.value =
-                    if (prefs.horoscopeCardEnabled) HoroscopeEngine.of(today) else null
+                    if (prefs.horoscopeCardEnabled) HoroscopeEngine.of(today, mySign) else null
                 // 数据集 93KB / 1098 条，只在开关打开时才读并解析（spec 5 节：开关为关时不计算也不组合）。
                 // 也不能放在 collect 之前：那样会用它挡住另两张卡的首帧，而它默认是关的。
                 _historyToday.value = if (prefs.historyCardEnabled) {

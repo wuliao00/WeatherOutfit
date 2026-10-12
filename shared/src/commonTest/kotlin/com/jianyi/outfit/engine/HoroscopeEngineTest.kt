@@ -5,7 +5,9 @@ import com.jianyi.outfit.data.today.HoroscopePool
 import com.jianyi.outfit.platform.CivilDate
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
@@ -187,6 +189,39 @@ class HoroscopeEngineTest {
         assertEquals("12月22日–1月19日", HoroscopeEngine.of(CivilDate(2026, 12, 31))!!.signWindow)
         // 闰日仍在双鱼窗口内
         assertEquals("2月19日–3月20日", HoroscopeEngine.of(CivilDate(2024, 2, 29))!!.signWindow)
+    }
+
+    /**
+     * 生日 → 星座：边界一律取 tyme4kt 自己的判定（与卡片显示的区间同源）。
+     *
+     * 实测 10月23日**仍是天秤**、10月24日才是天蝎——这就是「只填月份」定不了星座的证据：
+     * 10月出生的人里，1~23 号是天秤、24 号之后是天蝎，只按月份推会错掉一大半。
+     */
+    @Test
+    fun sign_for_birthday_uses_library_boundaries() {
+        assertEquals("天秤", HoroscopeEngine.signForBirthday(10, 23), "10月23日库仍判天秤")
+        assertEquals("天蝎", HoroscopeEngine.signForBirthday(10, 24), "10月24日才是天蝎")
+        assertEquals("摩羯", HoroscopeEngine.signForBirthday(1, 1))
+        assertEquals("双鱼", HoroscopeEngine.signForBirthday(3, 20))
+        assertEquals("白羊", HoroscopeEngine.signForBirthday(3, 21))
+        assertEquals("双鱼", HoroscopeEngine.signForBirthday(2, 29), "闰日也归双鱼——参照年必须是闰年")
+        assertNull(HoroscopeEngine.signForBirthday(13, 1), "13 月")
+        assertNull(HoroscopeEngine.signForBirthday(4, 31), "4月31日不存在")
+    }
+
+    /** 指定星座时：内容取那个星座、区间换成它的、并标出「这是我的」 */
+    @Test
+    fun explicit_sign_overrides_the_daily_one() {
+        val day = CivilDate(2026, 10, 12) // 当天太阳在天秤
+        val sun = HoroscopeEngine.of(day)!!
+        assertEquals("天秤", sun.constellation)
+        assertFalse(sun.isMine, "没指定星座时不是「我的星座」")
+
+        val mine = HoroscopeEngine.of(day, "双鱼")!!
+        assertEquals("双鱼", mine.constellation)
+        assertTrue(mine.isMine)
+        assertEquals("2月19日–3月20日", mine.signWindow, "区间要跟着指定的星座走")
+        assertNotEquals(sun.overall, mine.overall, "不同星座取到的句子必须不同，否则等于没按星座取")
     }
 
     private fun plusDays(c: CivilDate, n: Int): CivilDate {

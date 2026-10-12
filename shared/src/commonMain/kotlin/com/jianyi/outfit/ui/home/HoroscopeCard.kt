@@ -44,11 +44,15 @@ fun HoroscopeCard(h: Horoscope, modifier: Modifier = Modifier) {
             SourceBadge(text = Horoscope.SOURCE_LABEL)
         }
 
-        // 星座区间是这条卡里唯一的可核实事实（由 tyme4kt 的边界扫出），单独一行、弱化处理，
-        // 免得和下面四句自撰文案混成同一层级
-        if (h.signWindow.isNotBlank()) {
+        // 这一行承载两件事：区间（本卡唯一的可核实事实），以及「这是不是你的星座」——
+        // 填过生日才标「我的星座」，没填时展示的是**当天太阳所在的**星座，两者不能混着看
+        val windowLine = listOfNotNull(
+            "我的星座".takeIf { h.isMine },
+            h.signWindow.takeIf { it.isNotBlank() }
+        )
+        if (windowLine.isNotEmpty()) {
             Text(
-                text = h.signWindow,
+                text = windowLine.joinToString(" · "),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

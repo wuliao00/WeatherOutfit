@@ -4,7 +4,10 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.jianyi.outfit.WeatherOutfitApp
+import com.jianyi.outfit.engine.HoroscopeEngine
 import com.jianyi.outfit.engine.OutfitRecommendationEngine
+import com.jianyi.outfit.platform.todayCivilDate
+import com.jianyi.outfit.util.Formatters
 import kotlinx.coroutines.flow.first
 
 /**
@@ -33,10 +36,19 @@ class DailyOutfitWorker(
             val weather = result.getOrNull()
                 ?: return retryOrFail()
             val recommendation = OutfitRecommendationEngine.recommend(weather, prefs)
+            // 填过生日才带星座那一句，而且用的是「我的星座」（用户填的那个），
+            // 不是当天太阳所在的星座 —— 后者对用户没有意义，写进推送是误导。
+            // 引擎是纯函数、离线，推送因此不额外依赖任何网络
+            val mine = if (prefs.hasBirthday) {
+                HoroscopeEngine.signForBirthday(prefs.birthMonth, prefs.birthDay)
+                    ?.let { HoroscopeEngine.of(todayCivilDate(), it) }
+            } else {
+                null
+            }
             Notifier.showDaily(
                 applicationContext,
                 title = "今日穿搭建议 · ${weather.city}",
-                text = recommendation.summary
+                text = Formatters.dailyPushText(recommendation.summary, mine)
             )
             Result.success()
         } catch (e: Exception) {

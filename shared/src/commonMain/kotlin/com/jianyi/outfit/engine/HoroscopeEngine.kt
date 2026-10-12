@@ -29,12 +29,16 @@ import com.tyme.solar.SolarDay
  */
 object HoroscopeEngine {
 
-    /** @return 当日星座内容；日期非法或星座名不在表内时返回 null（交给 UI 不渲染该卡） */
-    fun of(date: CivilDate): Horoscope? {
+    /**
+     * @param sign 指定星座（两位短名）；为空时用 [date] 当天的太阳星座。
+     *   传值即「我的星座」——卡片会据此标注，推送也走这条路。
+     * @return 当日星座内容；日期非法或星座名不在表内时返回 null（交给 UI 不渲染该卡）
+     */
+    fun of(date: CivilDate, sign: String? = null): Horoscope? {
         val solar = runCatching { SolarDay(date.year, date.month, date.day) }.getOrNull()
             ?: return null
         // 名字用 getName()：1.5.0 的 Constellation 没有 .name 属性（Task 1 实测）
-        val name = runCatching { solar.getConstellation().getName() }.getOrNull() ?: return null
+        val name = sign ?: runCatching { solar.getConstellation().getName() }.getOrNull() ?: return null
 
         val signIndex = SIGN_ORDER.indexOf(name)
         if (signIndex < 0) return null
@@ -53,8 +57,22 @@ object HoroscopeEngine {
             luckyColor = colors[(signIndex + doy) % colors.size],
             // 每步跨 1（原来是 doy*3，模 9 后实际 3 天一轮）：同一步长才配得上「9 天不重复」
             luckyNumber = (signIndex * 7 + doy) % 9 + 1,
-            signWindow = windowOf(date, name)
+            signWindow = windowOfSign(name),
+            isMine = sign != null
         )
+    }
+
+    /**
+     * 由出生月/日推星座（两位短名），非法日期返回 null。
+     *
+     * 用**闰年**做参照年：星座边界与年份无关，但 2月29日只在闰年存在——
+     * 拿非闰年的 2026 去构造会直接抛异常，把 2/29 出生的人误判成「没填」。
+     * 边界一律以 tyme4kt 自己的判定为准（与卡片上显示的区间同源）：
+     * 实测 10月23日仍是天秤、10月24日才是天蝎。
+     */
+    fun signForBirthday(month: Int, day: Int): String? {
+        if (month !in 1..12 || day !in 1..31) return null
+        return signNameOf(CivilDate(2024, month, day))
     }
 
     /**
@@ -70,21 +88,28 @@ object HoroscopeEngine {
      * 星座区间，形如「9月23日–10月23日」。
      *
      * tyme4kt 1.5.0 的 `Constellation` **没有**起止日期 API（只有 getName/next/fromName/fromIndex），
-     * 所以从当天前后扫库自己的边界：一直走到 `getConstellation()` 换人为止。这样显示的区间与
-     * 卡上那个星座**永远自洽**，不依赖任何"通用星座表"——实测 tyme4kt 的天秤是 9月23日–10月23日，
-     * 而通用表写的是到 10月22日，照抄通用表就和卡上的星座对不上了。
+     * 所以扫库自己的边界：先找到一个属于该星座的日子当锚点，再前后走到换人为止。
      *
-     * 双向各最多走 40 天（真值 30~32 天），是防越界数据的护栏，不是业务上限。
+     * 锚点必须**落在该星座内部**，不能拿传入的日期当锚：卡片被指定成「我的星座」时，
+     * 当天日期往往不在那个星座的窗口里（10月中指定双鱼），那时前后一步就换人、
+     * 区间退化成「10月12日–10月12日」——这条正是单元测试抓出来的。
+     * 锚点用闰年 2024 的 1 月 1 日起扫，好处是 2 月 29 日一定存在；星座边界与年份无关，
+     * 所以扫哪一年结果一样（摩羯会正确地跨到上一年的 12 月 22 日）。
      */
-    private fun windowOf(date: CivilDate, sign: String): String {
-        var first = date
+    private fun windowOfSign(sign: String): String {
+        var probe = CivilDate(2024, 1, 1)
         var guard = 0
+        while (guard++ < 400 && signNameOf(probe) != sign) probe = plusDays(probe, 1)
+        if (signNameOf(probe) != sign) return ""
+
+        var first = probe
+        guard = 0
         while (guard++ < 40) {
             val prev = plusDays(first, -1)
             if (signNameOf(prev) != sign) break
             first = prev
         }
-        var last = date
+        var last = probe
         guard = 0
         while (guard++ < 40) {
             val next = plusDays(last, 1)

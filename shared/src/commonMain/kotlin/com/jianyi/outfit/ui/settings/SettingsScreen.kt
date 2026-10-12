@@ -4,7 +4,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -65,6 +68,7 @@ import com.jianyi.outfit.data.model.ToleranceLevel
 import com.jianyi.outfit.data.model.WindUnit
 import com.jianyi.outfit.data.repository.ApiCredentials
 import com.jianyi.outfit.platform.installedVersionName
+import com.jianyi.outfit.engine.HoroscopeEngine
 import com.jianyi.outfit.ui.glass.GlassEmphasis
 import com.jianyi.outfit.ui.glass.GlassIconButton
 import com.jianyi.outfit.ui.glass.GlassRole
@@ -100,6 +104,7 @@ fun SettingsScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val scenery = LocalScenery.current
     val dark = scenery.dark || isSystemInDarkTheme()
+    var showBirthday by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.message) {
         state.message?.let {
@@ -256,6 +261,13 @@ fun SettingsScreen(
                     onCheckedChange = viewModel::setHoroscopeCard,
                     dark = dark
                 )
+                // 生日是可选项：填了卡片与推送就落到用户自己的星座，不填维持
+                // 「当天太阳所在的星座」。它不是开关，是取值，所以不用 SwitchRow
+                BirthdayRow(
+                    month = state.prefs.birthMonth,
+                    day = state.prefs.birthDay,
+                    onClick = { showBirthday = true }
+                )
             }
 
             // ===== 穿搭偏好 =====
@@ -382,6 +394,23 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.onSurface
                 )
             }
+        }
+
+        if (showBirthday) {
+            BirthdayPickerDialog(
+                month = state.prefs.birthMonth,
+                day = state.prefs.birthDay,
+                dark = dark,
+                onConfirm = { m, d ->
+                    viewModel.setBirthday(m, d)
+                    showBirthday = false
+                },
+                onClear = {
+                    viewModel.clearBirthday()
+                    showBirthday = false
+                },
+                onDismiss = { showBirthday = false }
+            )
         }
 
         SnackbarHost(
@@ -686,4 +715,177 @@ private fun TextButtonRow(text: String, onClick: (() -> Unit)?) {
             .clickable(enabled = onClick != null) { onClick?.invoke() }
             .padding(vertical = 8.dp)
     )
+}
+
+/* ============ 生日（我的星座） ============ */
+
+/**
+ * 生日行：不是开关、是取值，所以不用 SwitchRow。
+ * 副标题直接给出**推算出来的星座**（与星座卡同一套 tyme4kt 边界），填过才有「我的星座」。
+ */
+@Composable
+private fun BirthdayRow(month: Int, day: Int, onClick: () -> Unit) {
+    val sign = if (month in 1..12 && day in 1..31) HoroscopeEngine.signForBirthday(month, day) else null
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = "我的星座",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                // 未设置时不写「未设置」三个字了事：顺带说清填了有什么用
+                text = if (sign != null) {
+                    "${sign}座 · ${month}月${day}日"
+                } else {
+                    "未设置 · 填出生日期后，卡片与每日推送按你的星座出内容"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Text(
+            text = "修改",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary
+        )
+    }
+}
+
+/**
+ * 生日选择：月、日两组 chip。
+ *
+ * 只给月份是不够的——星座跨月（10月23日仍是天秤、10月24日才是天蝎），
+ * 所以必须让用户选到日；日的上限随月份变（2 月放到 29，闰年那天也归双鱼）。
+ * 不填也能用（退回当天太阳星座），所以留「清除」。
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun BirthdayPickerDialog(
+    month: Int,
+    day: Int,
+    dark: Boolean,
+    onConfirm: (Int, Int) -> Unit,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    // 默认给一个有效初值：这里只是选择器的起点，不是对用户的猜测（不点确定就不会落盘）
+    var m by remember { mutableIntStateOf(if (month in 1..12) month else 10) }
+    var d by remember { mutableIntStateOf(if (day in 1..31) day else 12) }
+    val maxDay = daysInMonth(m)
+    if (d > maxDay) d = maxDay
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onDismiss
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        GlassSurface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp),
+            emphasis = GlassEmphasis.REGULAR,
+            role = GlassRole.CARD,
+            dark = dark
+        ) {
+            Text(
+                text = "我的星座",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = "只填月份定不了星座（星座跨月），所以月和日都要",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "月",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 6.dp)
+            )
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                (1..12).forEach { i ->
+                    PickerChip(text = "$i", selected = i == m, dark = dark) { m = i }
+                }
+            }
+            Text(
+                text = "日",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                (1..maxDay).forEach { i ->
+                    PickerChip(text = "$i", selected = i == d, dark = dark) { d = i }
+                }
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                PickerChip(text = "清除", selected = false, dark = dark, onClick = onClear)
+                Spacer(Modifier.weight(1f))
+                val sign = HoroscopeEngine.signForBirthday(m, d)
+                if (sign != null) {
+                    Text(
+                        text = "${sign}座",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                PickerChip(text = "确定", selected = true, dark = dark) { onConfirm(m, d) }
+            }
+        }
+    }
+}
+
+/** 选择器里的小胶囊：选中态用一层稍厚的玻璃，未选中用极薄，靠「厚度」而不是描边区分 */
+@Composable
+private fun PickerChip(
+    text: String,
+    selected: Boolean,
+    dark: Boolean,
+    onClick: () -> Unit
+) {
+    GlassSurface(
+        emphasis = if (selected) GlassEmphasis.THIN else GlassEmphasis.ULTRA_THIN,
+        shape = GlassShapes.bar,
+        role = GlassRole.BAR,
+        dark = dark,
+        onClick = onClick,
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 5.dp)
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+/** 某月的天数：2 月按 29 放（闰日出生的用户不该被这个选择器挡住） */
+private fun daysInMonth(month: Int): Int = when (month) {
+    1, 3, 5, 7, 8, 10, 12 -> 31
+    4, 6, 9, 11 -> 30
+    else -> 29
 }

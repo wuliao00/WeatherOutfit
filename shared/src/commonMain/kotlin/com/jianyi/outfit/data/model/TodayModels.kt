@@ -91,7 +91,9 @@ data class Horoscope(
     val luckyColor: String,
     val luckyNumber: Int,
     /** 本星座区间，形如「9月23日–10月23日」；由 tyme4kt 的星座边界扫出，与该卡当天显示的星座自洽 */
-    val signWindow: String
+    val signWindow: String,
+    /** 是否按用户填的生日指定（true 时卡片标注「我的星座」；false 表示展示的是当天太阳所在的星座） */
+    val isMine: Boolean
 ) {
     companion object {
         const val SOURCE_LABEL = "娱乐内容，非预测"

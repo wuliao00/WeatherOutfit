@@ -1,5 +1,6 @@
 package com.jianyi.outfit.util
 
+import com.jianyi.outfit.data.model.Horoscope
 import com.jianyi.outfit.data.model.TempUnit
 import com.jianyi.outfit.data.model.WeatherNow
 import com.jianyi.outfit.data.model.WindUnit
@@ -106,4 +107,17 @@ object Formatters {
         val body = "${scaled / 10}.${scaled % 10}"
         return if (v < 0) "-$body" else body
     }
+
+    /**
+     * 每日推送正文：穿搭建议 +（填过生日时）用户自己星座的整体那一句。
+     *
+     * 两件事挤同一条通知，是因为这条渠道本来就是「每天一次、把今天该知道的给你」；
+     * 再开一个星座渠道等于让用户多管一个开关、多一次打扰。星座是自撰的娱乐内容，
+     * 所以只带**整体**一句、并冠以星座名——用户一眼能看出这段不是天气数据。
+     *
+     * @param mine 只传「我的星座」（用户填过生日才非空）；没填就不带这一段，
+     *   而不是拿当天太阳所在的星座顶上——那不是用户的星座，写上去是误导。
+     */
+    fun dailyPushText(summary: String, mine: Horoscope?): String =
+        if (mine == null) summary else "$summary\n${mine.constellation}座 · ${mine.overall}"
 }

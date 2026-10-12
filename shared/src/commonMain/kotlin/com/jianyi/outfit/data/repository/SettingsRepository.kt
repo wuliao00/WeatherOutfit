@@ -69,4 +69,13 @@ interface SettingsRepository {
     suspend fun setAlmanacCardEnabled(enabled: Boolean)
     suspend fun setHistoryCardEnabled(enabled: Boolean)
     suspend fun setHoroscopeCardEnabled(enabled: Boolean)
+
+    /**
+     * 写入出生月/日（1~12 / 1~31）。星座卡与每日推送据此落到用户自己的星座；
+     * 不填则退回「今天太阳所在的星座」。只存月份不足以定星座（星座跨月），故月日成对。
+     */
+    suspend fun setBirthday(month: Int, day: Int)
+
+    /** 清除生日：卡片与推送退回按当天太阳星座的默认行为 */
+    suspend fun clearBirthday()
 }

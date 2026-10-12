@@ -166,6 +166,16 @@ class SettingsViewModel(private val deps: AppDependencies) : ViewModel() {
         viewModelScope.launch { deps.settingsRepository.setHoroscopeCardEnabled(enabled) }
     }
 
+    /** 生日（月+日）：星座卡与每日推送据此落到用户自己的星座；只填月份定不了星座，故成对 */
+    fun setBirthday(month: Int, day: Int) {
+        viewModelScope.launch { deps.settingsRepository.setBirthday(month, day) }
+    }
+
+    /** 清除生日：退回「当天太阳所在的星座」的默认行为 */
+    fun clearBirthday() {
+        viewModelScope.launch { deps.settingsRepository.clearBirthday() }
+    }
+
     /** 重置免责声明确认状态：下次启动重新弹出使用须知 */
     fun resetDisclaimer() {
         viewModelScope.launch {

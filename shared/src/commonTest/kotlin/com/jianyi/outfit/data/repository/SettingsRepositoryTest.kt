@@ -46,6 +46,38 @@ class SettingsRepositoryTest {
     }
 
     @Test
+    fun 生日成对落盘且清除是删键() = runTest {
+        val backend = FakeBackend()
+        val repo = SettingsRepositoryImpl(backend)
+
+        // 没写过 = 未设置：卡片与推送都退回「当天太阳所在的星座」
+        assertFalse(repo.preferences.first().hasBirthday, "空偏好下不该有生日")
+
+        repo.setBirthday(10, 23)
+        assertEquals(10, backend.current.value["birth_month"], "月按 Int 落盘，与既有键风格一致")
+        assertEquals(23, backend.current.value["birth_day"])
+        assertTrue(repo.preferences.first().hasBirthday)
+
+        // 越界值就地夹住：脏数据不该进盘（12 月 31 日是合法上界）
+        repo.setBirthday(13, 40)
+        assertEquals(12, backend.current.value["birth_month"])
+        assertEquals(31, backend.current.value["birth_day"])
+
+        repo.clearBirthday()
+        assertFalse("birth_month" in backend.current.value, "清除 = 删键（与 scenery_key 同语义）")
+        assertFalse("birth_day" in backend.current.value)
+        assertFalse(repo.preferences.first().hasBirthday)
+    }
+
+    @Test
+    fun 只写了月份不算设置好生日() = runTest {
+        // 盘上只有月份（历史脏数据或手改）时不能当已设置：只填月份定不了星座（星座跨月），
+        // 拿它去推星座等于把半个月的人判错
+        val prefs = SettingsRepositoryImpl(FakeBackend(mapOf("birth_month" to 10))).preferences.first()
+        assertFalse(prefs.hasBirthday, "月日必须成对才算已设置")
+    }
+
+    @Test
     fun 写入用的是历史那套键名与值类型() = runTest {
         val backend = FakeBackend()
         val repo = SettingsRepositoryImpl(backend)
