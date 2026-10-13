@@ -62,11 +62,34 @@ jobs:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
         run: echo "present=$([ -n "$RELEASE_KEYSTORE_BASE64" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
+      # 这一步只报「值的形状」不报内容，且用 ::notice::/::error:: 发成 annotation ——
+      # annotation 是匿名可读的，而 job 日志要登录。2026-10-13 那次 Decode 失败就是靠
+      # 「失败在哪一步」定位的，但那一步的 stderr 我读不到；加上形状后一眼能判是粘贴脏了还是别的。
+      - name: Keystore secret shape (never prints content)
+        if: steps.keystore.outputs.present == 'true'
+        env:
+          B64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          v="$B64"
+          len=${#v}
+          first4=${v:0:4}
+          has_cr=$([ "$v" != "$(printf %s "$v" | tr -d '\r')" ] && echo yes || echo no)
+          has_space=$([ "$v" != "$(printf %s "$v" | tr -d '[:space:]')" ] && echo yes || echo no)
+          tail4=$(printf %s "$v" | tail -c 4)
+          if [ "$has_cr" = "yes" ] || [ "$has_space" = "yes" ] || [ "$len" -lt 1000 ]; then
+            echo "::error::keystore secret 形状可疑（长度干净时应为 5792）：len=$len first4=$first4 tail4=$tail4 cr=$has_cr space=$has_space"
+          else
+            echo "::notice::keystore secret 形状：len=$len first4=$first4 tail4=$tail4 cr=$has_cr space=$has_space"
+          fi
+
+      # 容忍粘贴带换行/空白：先把空白全删掉再解码（GNU base64 本身容错换行，但对 BOM/多余文本不行）
       - name: Decode release keystore
         if: steps.keystore.outputs.present == 'true'
         env:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
-        run: echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > "${{ runner.temp }}/release.jks"
+        run: |
+          printf '%s' "$RELEASE_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > "${{ runner.temp }}/release.jks"
+          echo "decoded bytes: $(wc -c < "${{ runner.temp }}/release.jks")"
 
       - name: Assemble Release
         env:
