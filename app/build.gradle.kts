@@ -22,8 +22,8 @@ android {
         applicationId = "com.jianyi.outfit"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "2.2.0"
+        versionCode = 10
+        versionName = "2.3.0"
 
         // 通过 BuildConfig 注入接口凭证，代码中统一使用 BuildConfig.WEATHER_API_ID / KEY
         buildConfigField(
